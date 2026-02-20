@@ -1,0 +1,310 @@
+﻿@page "/performance"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject AnalyticsApiClient AnalyticsApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px;">
+        <h1><i class="ph-duotone ph-trend-up" style="margin-right: 8px; color: var(--accent-cyan);"></i>Performance</h1>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">
+            <i class="ph-light ph-clock" style="margin-right: 4px;"></i>@DateTime.Now.ToString("dddd, MMMM dd yyyy")
+        </span>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-blue); animation: spin 1s linear infinite;"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">Loading analytics...</p>
+        </div>
+    }
+    else if (_data is null)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-chart-pie" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">Unable to load analytics.</p>
+        </div>
+    }
+    else
+    {
+        <!-- Top Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-chart-bar" style="margin-right: 4px;"></i>Total Signals</div>
+                <div class="stat-value">@_data.TotalSignals</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-star" style="margin-right: 4px;"></i>Avg Score</div>
+                <div class="stat-value">@_data.AvgScore</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-warning" style="margin-right: 4px;"></i>Avg Risk</div>
+                <div class="stat-value" style="color: var(--accent-amber);">@_data.AvgRisk%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-trophy" style="margin-right: 4px;"></i>Win Rate</div>
+                <div class="stat-value" style="color: @(_data.WinRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">
+                    @(_data.WinRate > 0 ? $"{_data.WinRate}%" : "N/A")
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-currency-dollar" style="margin-right: 4px;"></i>Total P&L</div>
+                <div class="stat-value @(_data.TotalPnL >= 0 ? "positive" : "negative")">
+                    @(_data.TotalPnL != 0 ? _data.TotalPnL.ToString("+$#,##0.00;-$#,##0.00") : "N/A")
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-lightning" style="margin-right: 4px;"></i>High Conviction</div>
+                <div class="stat-value" style="color: var(--accent-cyan);">@_data.HighConviction</div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <!-- Score Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-star" style="margin-right: 6px;"></i>Score Distribution</span>
+                </div>
+                @foreach (var bucket in _data.ScoreDistribution)
+                {
+                    var maxCount = _data.ScoreDistribution.Max(b => b.Count);
+                    var pct = maxCount > 0 ? (int)(bucket.Count * 100.0 / maxCount) : 0;
+                    var barColor = bucket.Bucket switch
+                    {
+                                    "0-25" => "var(--accent-red)",
+                                    "25-50" => "var(--accent-amber)",
+                                    "50-75" => "var(--accent-blue)",
+                                    "75-100" => "var(--accent-green)",
+                        _ => "var(--accent-blue)"
+                    };
+
+                    <div style="margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.8rem; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace;">@bucket.Bucket</span>
+                            <span style="font-size: 0.8rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">@bucket.Count signals</span>
+                        </div>
+                        <div class="score-bar">
+                            <div style="height: 100%; width: @(pct)%; background: @barColor; border-radius: 3px; transition: width 0.5s;"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Signal Type Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-arrows-down-up" style="margin-right: 6px;"></i>Signal Types</span>
+                </div>
+                @if (_data.SignalTypeDistribution.Any())
+                {
+                    @foreach (var t in _data.SignalTypeDistribution)
+                    {
+                        var pct = _data.TotalSignals > 0 ? (int)(t.Count * 100.0 / _data.TotalSignals) : 0;
+                        var color = t.Type.ToLower() == "short" ? "var(--accent-red)" : "var(--accent-green)";
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border);">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="signal-type-badge @(t.Type.ToLower() == "short" ? "short" : "long")" style="font-size: 0.65rem;">
+                                    @t.Type
+                                </span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div style="width: 80px; height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden;">
+                                    <div style="height: 100%; width: @(pct)%; background: @color; border-radius: 3px;"></div>
+                                </div>
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary); min-width: 70px; text-align: right;">@t.Count · @pct%</span>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">No signal data yet.</p>
+                }
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <!-- Override Decisions -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-pencil-simple" style="margin-right: 6px;"></i>Override Decisions</span>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">@_data.TotalOverrides total</span>
+                </div>
+                @if (_data.TotalOverrides > 0)
+                {
+                    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                        <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-green); font-family: 'JetBrains Mono', monospace;">@_data.Accepted</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px;">
+                                <i class="ph-bold ph-check" style="margin-right: 2px;"></i>Accepted
+                            </div>
+                        </div>
+                        <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-red); font-family: 'JetBrains Mono', monospace;">@_data.Rejected</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px;">
+                                <i class="ph-bold ph-x" style="margin-right: 2px;"></i>Rejected
+                            </div>
+                        </div>
+                        <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-amber); font-family: 'JetBrains Mono', monospace;">@_data.Modified</div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px;">
+                                <i class="ph-bold ph-pencil" style="margin-right: 2px;"></i>Modified
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Override acceptance bar -->
+                    <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-input);">
+                        <div style="width: @(acceptPct)%; background: var(--accent-green);"></div>
+                        <div style="width: @(modPct)%; background: var(--accent-amber);"></div>
+                        <div style="width: @(rejectPct)%; background: var(--accent-red);"></div>
+                    </div>
+                }
+                else
+                {
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">No overrides recorded yet.</p>
+                }
+            </div>
+
+            <!-- Override Reasons -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-question" style="margin-right: 6px;"></i>Override Reasons</span>
+                </div>
+                @if (_data.ReasonBreakdown.Any())
+                {
+                    @foreach (var r in _data.ReasonBreakdown)
+                    {
+                        var pct = _data.TotalOverrides > 0 ? (int)(r.Count * 100.0 / _data.TotalOverrides) : 0;
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border);">
+                            <span style="font-size: 0.85rem; color: var(--text-secondary);">@r.Reason</span>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div style="width: 80px; height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden;">
+                                    <div style="height: 100%; width: @(pct)%; background: var(--accent-purple); border-radius: 3px;"></div>
+                                </div>
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary); min-width: 60px; text-align: right;">@r.Count · @pct%</span>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">No reason data yet.</p>
+                }
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- Regime Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-wave-sine" style="margin-right: 6px;"></i>Regime Distribution</span>
+                </div>
+                @if (_data.RegimeDistribution.Any())
+                {
+                    @foreach (var r in _data.RegimeDistribution)
+                    {
+                        var regimeClass = r.Regime.ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
+                        var pct = _data.TotalSignals > 0 ? (int)(r.Count * 100.0 / _data.TotalSignals) : 0;
+
+                        <div style="margin-bottom: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span class="regime-badge @regimeClass">@r.Regime</span>
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary);">@r.Count · @pct%</span>
+                            </div>
+                            <div class="score-bar">
+                                <div class="score-bar-fill high" style="width: @(pct)%;"></div>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">No regime data yet.</p>
+                }
+            </div>
+
+            <!-- Risk Profile -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="ph-duotone ph-shield-warning" style="margin-right: 6px;"></i>Risk Profile</span>
+                </div>
+                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-green); font-family: 'JetBrains Mono', monospace;">@_data.MinRisk%</div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; margin-top: 2px;">Min Risk</div>
+                    </div>
+                    <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-amber); font-family: 'JetBrains Mono', monospace;">@_data.AvgRisk%</div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; margin-top: 2px;">Avg Risk</div>
+                    </div>
+                    <div style="flex: 1; text-align: center; padding: 14px; background: var(--bg-input); border-radius: var(--radius-sm);">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-red); font-family: 'JetBrains Mono', monospace;">@_data.MaxRisk%</div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; margin-top: 2px;">Max Risk</div>
+                    </div>
+                </div>
+
+                <!-- Risk gauge bar -->
+                <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--accent-green), var(--accent-amber), var(--accent-red));">
+                    <div style="position: absolute; top: -4px; left: @(riskPosition)%; width: 16px; height: 16px; background: white; border-radius: 50%; border: 2px solid var(--accent-amber); transform: translateX(-50%);"></div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+                    <span style="font-size: 0.65rem; color: var(--text-muted);">Conservative</span>
+                    <span style="font-size: 0.65rem; color: var(--text-muted);">Aggressive</span>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private AnalyticsData? _data;
+    private bool _loading = true;
+    private bool _loaded;
+    private int acceptPct;
+    private int rejectPct;
+    private int modPct;
+    private double riskPosition;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _data = await AnalyticsApi.GetAnalyticsAsync();
+
+            if (_data is not null && _data.TotalOverrides > 0)
+            {
+                acceptPct = (int)(_data.Accepted * 100.0 / _data.TotalOverrides);
+                rejectPct = (int)(_data.Rejected * 100.0 / _data.TotalOverrides);
+                modPct = 100 - acceptPct - rejectPct;
+            }
+
+            if (_data is not null && _data.AvgRisk > 0)
+            {
+                riskPosition = Math.Min(_data.AvgRisk / 5.0 * 100, 100);
+            }
+        }
+        catch
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        finally { _loading = false; }
+
+        StateHasChanged();
+    }
+}

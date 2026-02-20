@@ -1,0 +1,337 @@
+﻿@page "/admin/users"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject UserAdminApiClient UserApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-users" style="margin-right: 8px; color: var(--accent-cyan);"></i>User Management</h1>
+        <button class="btn btn-primary" @onclick="() => _showInvite = true" disabled="@_showInvite">
+            <i class="ph-bold ph-user-plus"></i> Invite User
+        </button>
+    </div>
+
+    <!-- Invite Form -->
+    @if (_showInvite)
+    {
+        <div class="card" style="margin-bottom: 24px; max-width: 620px;">
+            <h3 style="margin-bottom: 16px;">
+                <i class="ph-duotone ph-user-plus" style="color: var(--accent-cyan); margin-right: 6px;"></i>Invite New User
+            </h3>
+
+            @if (!string.IsNullOrEmpty(_inviteError))
+            {
+                <div class="login-error" style="margin-bottom: 16px;">
+                    <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_inviteError
+                </div>
+            }
+
+            @if (_inviteResult is not null)
+            {
+                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px;">
+                    <div style="font-size: 0.85rem; color: var(--accent-green); margin-bottom: 8px;">
+                        <i class="ph-bold ph-check-circle" style="margin-right: 6px;"></i>User created successfully!
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem;">
+                        <div><span style="color: var(--text-muted);">Email:</span> <span style="color: var(--text-primary);">@_inviteResult.Email</span></div>
+                        <div><span style="color: var(--text-muted);">Role:</span> <span style="color: var(--text-primary);">@_inviteResult.Role</span></div>
+                        <div style="grid-column: span 2;">
+                            <span style="color: var(--text-muted);">Temp Password:</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: var(--accent-amber); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px; margin-left: 4px;">@_inviteResult.TempPassword</span>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px;">
+                        <i class="ph-light ph-warning" style="margin-right: 3px;"></i>Share this password securely. The user should change it on first login.
+                    </p>
+                </div>
+            }
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label><i class="ph-light ph-envelope" style="margin-right: 4px;"></i>Email</label>
+                    <input type="email" @bind="_inviteEmail" placeholder="user@example.com" />
+                </div>
+                <div class="form-group">
+                    <label><i class="ph-light ph-user" style="margin-right: 4px;"></i>Display Name (optional)</label>
+                    <input type="text" @bind="_inviteDisplayName" placeholder="John Doe" />
+                </div>
+                <div class="form-group">
+                    <label><i class="ph-light ph-shield" style="margin-right: 4px;"></i>Role</label>
+                    <select @bind="_inviteRole">
+                        <option value="Viewer">Viewer</option>
+                        <option value="Analyst">Analyst</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" @onclick="InviteUser" disabled="@_inviting">
+                    @if (_inviting)
+                    {
+                        <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                    }
+                    else
+                    {
+                        <i class="ph-bold ph-paper-plane-tilt"></i>
+                    }
+                    <span>Create User</span>
+                </button>
+                <button class="btn btn-secondary" @onclick="CloseInvite">Close</button>
+            </div>
+        </div>
+    }
+
+    <!-- Role Change Modal -->
+    @if (_showRoleChange)
+    {
+        <div class="card" style="margin-bottom: 24px; max-width: 400px;">
+            <h3 style="margin-bottom: 16px;">
+                <i class="ph-duotone ph-shield" style="color: var(--accent-cyan); margin-right: 6px;"></i>Change Role — @_roleChangeUserName
+            </h3>
+            <div class="form-group" style="margin-bottom: 16px;">
+                <label>New Role</label>
+                <select @bind="_newRole">
+                    <option value="Admin">Admin</option>
+                    <option value="Analyst">Analyst</option>
+                    <option value="Viewer">Viewer</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-primary" @onclick="ConfirmRoleChange">
+                    <i class="ph-bold ph-check"></i> Save
+                </button>
+                <button class="btn btn-secondary" @onclick="() => _showRoleChange = false">Cancel</button>
+            </div>
+        </div>
+    }
+
+    <!-- User List -->
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-blue); animation: spin 1s linear infinite;"></i>
+        </div>
+    }
+    else if (_users.Count == 0)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-users" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">No users found.</p>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-users-three" style="margin-right: 6px;"></i>All Users</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">@_users.Count users</span>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Last Login</th>
+                        <th>Joined</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _users)
+                    {
+                        var initials = string.Join("", u.DisplayName.Split(' ').Take(2).Select(n => n.Length > 0 ? n[0].ToString() : "")).ToUpper();
+                        var roleClass = u.Role switch
+                        {
+                                        "Admin" => "override-accepted",
+                                        "Analyst" => "override-modified",
+                            _ => "override-rejected"
+                        };
+
+                        <tr>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="user-avatar" style="width: 32px; height: 32px; font-size: 0.65rem;">@initials</div>
+                                    <span style="font-weight: 600;">@u.DisplayName</span>
+                                </div>
+                            </td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">@u.Email</td>
+                            <td>
+                                <span class="override-badge @roleClass" style="font-size: 0.65rem;">@u.Role</span>
+                            </td>
+                            <td>
+                                @if (u.IsLocked)
+                                {
+                                    <span style="font-size: 0.7rem; color: var(--accent-red);">
+                                        <i class="ph-bold ph-lock" style="margin-right: 3px;"></i>Locked
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span style="font-size: 0.7rem; color: var(--accent-green);">
+                                        <i class="ph-bold ph-check-circle" style="margin-right: 3px;"></i>Active
+                                    </span>
+                                }
+                            </td>
+                            <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted);">
+                                @(u.LastLoginUtc?.ToString("MMM dd, HH:mm") ?? "Never")
+                            </td>
+                            <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted);">
+                                @u.CreatedAt.ToString("MMM dd, yyyy")
+                            </td>
+                            <td>
+                                <div style="display: flex; gap: 6px;">
+                                    <button class="btn-icon" title="Change role" @onclick="() => OpenRoleChange(u.Id, u.DisplayName, u.Role)">
+                                        <i class="ph ph-shield" style="color: var(--accent-cyan);"></i>
+                                    </button>
+                                    @if (u.IsLocked)
+                                    {
+                                        <button class="btn-icon" title="Unlock user" @onclick="() => UnlockUser(u.Id)">
+                                            <i class="ph ph-lock-open" style="color: var(--accent-green);"></i>
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-icon" title="Lock user" @onclick="() => LockUser(u.Id)">
+                                            <i class="ph ph-lock" style="color: var(--accent-amber);"></i>
+                                        </button>
+                                    }
+                                    <button class="btn-icon" title="Delete user" @onclick="() => DeleteUser(u.Id)">
+                                        <i class="ph ph-trash" style="color: var(--accent-red);"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<UserDto> _users = new();
+    private bool _loading = true;
+    private bool _loaded;
+
+    // Invite form
+    private bool _showInvite;
+    private bool _inviting;
+    private string _inviteEmail = "";
+    private string _inviteDisplayName = "";
+    private string _inviteRole = "Viewer";
+    private string? _inviteError;
+    private InviteResultDto? _inviteResult;
+
+    // Role change
+    private bool _showRoleChange;
+    private string _roleChangeUserId = "";
+    private string _roleChangeUserName = "";
+    private string _newRole = "Viewer";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _users = await UserApi.GetUsersAsync();
+        }
+        catch
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        finally { _loading = false; }
+
+        StateHasChanged();
+    }
+
+    private async Task InviteUser()
+    {
+        _inviteError = null;
+        _inviteResult = null;
+
+        if (string.IsNullOrWhiteSpace(_inviteEmail))
+        {
+            _inviteError = "Email is required.";
+            return;
+        }
+
+        _inviting = true;
+
+        _inviteResult = await UserApi.InviteUserAsync(
+            _inviteEmail.Trim(),
+            string.IsNullOrWhiteSpace(_inviteDisplayName) ? null : _inviteDisplayName.Trim(),
+            _inviteRole);
+
+        if (_inviteResult is null)
+            _inviteError = "Failed to create user. Email may already exist.";
+        else
+        {
+            _users = await UserApi.GetUsersAsync();
+            _inviteEmail = "";
+            _inviteDisplayName = "";
+            _inviteRole = "Viewer";
+        }
+
+        _inviting = false;
+        StateHasChanged();
+    }
+
+    private void CloseInvite()
+    {
+        _showInvite = false;
+        _inviteResult = null;
+        _inviteError = null;
+    }
+
+    private void OpenRoleChange(string userId, string userName, string currentRole)
+    {
+        _roleChangeUserId = userId;
+        _roleChangeUserName = userName;
+        _newRole = currentRole;
+        _showRoleChange = true;
+    }
+
+    private async Task ConfirmRoleChange()
+    {
+        await UserApi.ChangeRoleAsync(_roleChangeUserId, _newRole);
+        _showRoleChange = false;
+        _users = await UserApi.GetUsersAsync();
+        StateHasChanged();
+    }
+
+    private async Task LockUser(string userId)
+    {
+        await UserApi.LockUserAsync(userId);
+        _users = await UserApi.GetUsersAsync();
+        StateHasChanged();
+    }
+
+    private async Task UnlockUser(string userId)
+    {
+        await UserApi.UnlockUserAsync(userId);
+        _users = await UserApi.GetUsersAsync();
+        StateHasChanged();
+    }
+
+    private async Task DeleteUser(string userId)
+    {
+        await UserApi.DeleteUserAsync(userId);
+        _users = await UserApi.GetUsersAsync();
+        StateHasChanged();
+    }
+}

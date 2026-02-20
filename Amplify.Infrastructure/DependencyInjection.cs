@@ -1,0 +1,41 @@
+﻿using Amplify.Application.Common.Interfaces.AI;
+using Amplify.Application.Common.Interfaces.Trading;
+using Amplify.Domain.Entities.Identity;
+using Amplify.Infrastructure.ExternalServices.AI;
+using Amplify.Infrastructure.ExternalServices.Trading;
+using Amplify.Infrastructure.Persistence;
+using Amplify.Infrastructure.Services;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+
+namespace Amplify.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services, IConfiguration config)
+    {
+        services.AddDbContext<ApplicationDbContext>(o =>
+            o.UseSqlServer(config.GetConnectionString("DefaultConnection")));
+
+        services.AddIdentity<ApplicationUser, IdentityRole>()
+            .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddDefaultTokenProviders();
+
+        // Services
+        services.AddScoped<ITradeSignalService, TradeSignalService>();
+
+        services.AddScoped<IAIAdvisor, OllamaAIAdvisor>();// AI Advi
+
+        services.AddScoped<IPatternDetector, PatternDetector>();
+
+        services.AddHostedService<Amplify.Infrastructure.Services.BackgroundPatternScannerService>();
+
+        services.AddHttpClient<IPatternAnalyzer, OllamaPatternAnalyzer>();
+
+        return services;
+    }
+}

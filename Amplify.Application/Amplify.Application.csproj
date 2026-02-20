@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Common\Interfaces\Data\" />
+    <Folder Include="Common\Mappings\" />
+    <Folder Include="Services\AI\" />
+    <Folder Include="Services\Admin\" />
+    <Folder Include="Services\Services\" />
+    <Folder Include="Validators\Admin\" />
+    <Folder Include="Validators\Trading\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Amplify.Domain\Amplify.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

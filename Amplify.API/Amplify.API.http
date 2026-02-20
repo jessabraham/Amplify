@@ -1,0 +1,6 @@
+@Amplify.API_HostAddress = http://localhost:5263
+
+GET {{Amplify.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

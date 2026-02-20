@@ -1,0 +1,301 @@
+﻿@page "/overrides"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Domain.Enumerations
+@inject OverrideApiClient OverrideApi
+@inject SignalApiClient SignalApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-pencil-simple" style="margin-right: 8px; color: var(--accent-cyan);"></i>Overrides</h1>
+        <button class="btn btn-primary" @onclick="() => _showForm = true" disabled="@_showForm">
+            <i class="ph-bold ph-plus"></i> New Override
+        </button>
+    </div>
+
+    @if (_showForm)
+    {
+        <div class="card" style="margin-bottom: 24px; max-width: 720px;">
+            <h3 style="margin-bottom: 16px;">
+                <i class="ph-duotone ph-pencil-simple" style="color: var(--accent-cyan); margin-right: 6px;"></i>Log Override
+            </h3>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="login-error" style="margin-bottom: 16px;">
+                    <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error
+                </div>
+            }
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label><i class="ph-light ph-chart-bar" style="margin-right: 4px;"></i>Signal</label>
+                    <select @bind="_selectedSignalId">
+                        <option value="">Select a signal...</option>
+                        @foreach (var s in _signals)
+                        {
+                            <option value="@s.Id">@s.Asset — @s.SignalType (@s.SetupScore.ToString("F1"))</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label><i class="ph-light ph-tag" style="margin-right: 4px;"></i>Override Type</label>
+                    <select @bind="_overrideType">
+                        @foreach (var val in Enum.GetValues<OverrideType>())
+                        {
+                            <option value="@((int)val)">@val</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label><i class="ph-light ph-question" style="margin-right: 4px;"></i>Reason</label>
+                    <select @bind="_reason">
+                        @foreach (var val in Enum.GetValues<OverrideReason>())
+                        {
+                            <option value="@((int)val)">@val</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label><i class="ph-light ph-note" style="margin-right: 4px;"></i>Notes</label>
+                    <input type="text" @bind="_notes" placeholder="Optional notes..." />
+                </div>
+            </div>
+
+            @if (_overrideType == (int)OverrideType.Modified)
+            {
+                <hr style="border-color: var(--border); margin: 16px 0;" />
+                <h3 style="margin-bottom: 12px; font-size: 0.9rem;">
+                    <i class="ph-light ph-pencil" style="margin-right: 4px;"></i>Modified Levels
+                </h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Entry</label>
+                        <input type="number" @bind="_modEntry" step="0.01" />
+                    </div>
+                    <div class="form-group">
+                        <label>Stop Loss</label>
+                        <input type="number" @bind="_modStop" step="0.01" />
+                    </div>
+                    <div class="form-group">
+                        <label>Target 1</label>
+                        <input type="number" @bind="_modTarget1" step="0.01" />
+                    </div>
+                    <div class="form-group">
+                        <label>Target 2</label>
+                        <input type="number" @bind="_modTarget2" step="0.01" />
+                    </div>
+                </div>
+            }
+
+            <div style="margin-top: 16px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" @onclick="SubmitOverride" disabled="@_saving">
+                    @if (_saving)
+                    {
+                        <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <i class="ph-bold ph-check"></i>
+                        <span>Submit</span>
+                    }
+                </button>
+                <button class="btn btn-secondary" @onclick="() => _showForm = false">Cancel</button>
+            </div>
+        </div>
+    }
+
+    <!-- Override History -->
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-blue); animation: spin 1s linear infinite;"></i>
+        </div>
+    }
+    else if (_overrides.Count == 0)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-pencil-simple" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">No overrides recorded yet.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Accept, reject, or modify a signal to start tracking your decisions.</p>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Signal</th>
+                        <th>Decision</th>
+                        <th>Reason</th>
+                        <th>Notes</th>
+                        <th>Outcome</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in _overrides)
+                    {
+                        var decisionClass = o.OverrideType switch
+                        {
+                                        "Accepted" => "override-accepted",
+                                        "Rejected" => "override-rejected",
+                                        "Modified" => "override-modified",
+                            _ => ""
+                        };
+
+                        <tr>
+                            <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">@o.Asset</td>
+                            <td>
+                                <span class="signal-type-badge @(o.SignalType.ToLower() == "short" ? "short" : "long")" style="font-size: 0.6rem;">
+                                    @o.SignalType
+                                </span>
+                            </td>
+                            <td>
+                                <span class="override-badge @decisionClass">
+                                    @if (o.OverrideType == "Accepted")
+                                    {
+                                        <i class="ph-bold ph-check" style="margin-right: 3px;"></i>
+                                    }
+                                    else if (o.OverrideType == "Rejected")
+                                    {
+                                        <i class="ph-bold ph-x" style="margin-right: 3px;"></i>
+                                    }
+                                    else
+                                    {
+                                        <i class="ph-bold ph-pencil" style="margin-right: 3px;"></i>
+                                    }
+                                    @o.OverrideType
+                                </span>
+                            </td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">@o.Reason</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis;">@(o.Notes ?? "—")</td>
+                            <td>
+                                @if (o.WasCorrect.HasValue)
+                                {
+                                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: @(o.WasCorrect.Value ? "var(--accent-green)" : "var(--accent-red)");">
+                                        @(o.ActualPnL?.ToString("+0.00;-0.00") ?? "—")
+                                        @(o.WasCorrect.Value ? "✓" : "✗")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span style="font-size: 0.75rem; color: var(--text-muted);">Pending</span>
+                                }
+                            </td>
+                            <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted);">@o.CreatedAt.ToString("MMM dd, HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<OverrideDto> _overrides = new();
+    private List<TradeSignalDto> _signals = new();
+    private bool _loading = true;
+    private bool _loaded;
+    private bool _showForm;
+    private bool _saving;
+    private string? _error;
+
+    // Form fields
+    private string _selectedSignalId = "";
+    private int _overrideType;
+    private int _reason;
+    private string _notes = "";
+    private decimal? _modEntry;
+    private decimal? _modStop;
+    private decimal? _modTarget1;
+    private decimal? _modTarget2;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _overrides = await OverrideApi.GetOverridesAsync();
+            _signals = await SignalApi.GetSignalsAsync();
+        }
+        catch
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        finally { _loading = false; }
+
+        StateHasChanged();
+    }
+
+    private async Task SubmitOverride()
+    {
+        _error = null;
+
+        if (string.IsNullOrEmpty(_selectedSignalId))
+        {
+            _error = "Please select a signal.";
+            return;
+        }
+
+        _saving = true;
+
+        var dto = new CreateOverrideDto
+        {
+            TradeSignalId = Guid.Parse(_selectedSignalId),
+            OverrideType = _overrideType,
+            Reason = _reason,
+            Notes = string.IsNullOrWhiteSpace(_notes) ? null : _notes,
+            ModifiedEntryPrice = _modEntry,
+            ModifiedStopLoss = _modStop,
+            ModifiedTarget1 = _modTarget1,
+            ModifiedTarget2 = _modTarget2
+        };
+
+        var success = await OverrideApi.CreateOverrideAsync(dto);
+
+        if (success)
+        {
+            _showForm = false;
+            _overrides = await OverrideApi.GetOverridesAsync();
+            ResetForm();
+        }
+        else
+        {
+            _error = "Failed to create override.";
+        }
+
+        _saving = false;
+    }
+
+    private void ResetForm()
+    {
+        _selectedSignalId = "";
+        _overrideType = 0;
+        _reason = 0;
+        _notes = "";
+        _modEntry = null;
+        _modStop = null;
+        _modTarget1 = null;
+        _modTarget2 = null;
+    }
+}

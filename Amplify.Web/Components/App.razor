@@ -1,0 +1,31 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="lib/phosphor-icons/thin/style.css" />
+    <link rel="stylesheet" href="lib/phosphor-icons/light/style.css" />
+    <link rel="stylesheet" href="lib/phosphor-icons/regular/style.css" />
+    <link rel="stylesheet" href="lib/phosphor-icons/bold/style.css" />
+    <link rel="stylesheet" href="lib/phosphor-icons/fill/style.css" />
+    <link rel="stylesheet" href="lib/phosphor-icons/duotone/style.css" />
+    <link rel="stylesheet" href="@Assets["css/app.css"]" />
+    <link rel="stylesheet" href="@Assets["Amplify.Web.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="js/charts-interop.js"></script>
+</body>
+
+</html>

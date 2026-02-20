@@ -1,0 +1,421 @@
+﻿@page "/watchlist"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject WatchlistApiClient WatchlistApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@implements IAsyncDisposable
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-binoculars" style="margin-right: 8px; color: var(--accent-cyan);"></i>Watchlist Scanner</h1>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 0.7rem; color: @(_hubConnected ? "var(--accent-green)" : "var(--accent-red)");">
+                <i class="ph-fill ph-circle" style="font-size: 0.5rem; margin-right: 4px;"></i>
+                @(_hubConnected ? "Live" : "Disconnected")
+            </span>
+        </div>
+    </div>
+
+    <!-- Add Symbol -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;">
+            <div class="form-group" style="margin-bottom: 0; min-width: 160px;">
+                <label><i class="ph-light ph-plus" style="margin-right: 4px;"></i>Add Symbol</label>
+                <input type="text" @bind="_newSymbol" placeholder="AAPL, TSLA, MSFT..." @onkeydown="HandleKeyDown" />
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 110px;">
+                <label>Interval</label>
+                <select @bind="_newInterval">
+                    <option value="5">5 min</option>
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">1 hour</option>
+                    <option value="240">4 hours</option>
+                    <option value="1440">Daily</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 100px;">
+                <label>Min Confidence</label>
+                <select @bind="_newMinConf">
+                    <option value="0">All</option>
+                    <option value="50">50+</option>
+                    <option value="60">60+</option>
+                    <option value="70">70+</option>
+                    <option value="80">80+</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 80px;">
+                <label>AI</label>
+                <select @bind="_newEnableAI">
+                    <option value="true">On</option>
+                    <option value="false">Off</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" @onclick="AddSymbol" disabled="@_adding" style="height: 40px;">
+                @if (_adding)
+                {
+                    <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                }
+                else
+                {
+                    <i class="ph-bold ph-plus"></i>
+                    <span>Add</span>
+                }
+            </button>
+        </div>
+
+        <!-- Quick add -->
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">Quick add:</span>
+            @foreach (var ticker in new[] { "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "AMZN", "META" })
+            {
+                var t = ticker;
+                var alreadyAdded = _items.Any(i => i.Symbol == t);
+                <button class="btn-chip @(alreadyAdded ? "active" : "")" @onclick="() => QuickAdd(t)" disabled="@alreadyAdded">
+                    @if (alreadyAdded)
+                    {
+                        <i class="ph ph-check" style="margin-right: 2px;"></i>
+                    }
+                    @t
+                </button>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="login-error" style="margin-top: 12px;">
+                <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error
+            </div>
+        }
+    </div>
+
+    <!-- Alerts Feed -->
+    @if (_alerts.Count > 0)
+    {
+        <div style="margin-bottom: 20px;">
+            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px;">
+                <i class="ph-bold ph-bell-ringing" style="margin-right: 4px; color: var(--accent-amber);"></i>Recent Alerts
+            </div>
+            @foreach (var alert in _alerts.Take(5))
+            {
+                var biasColor = alert.OverallBias switch
+                {
+                                            "Strong Bullish" or "Bullish" => "var(--accent-green)",
+                                            "Strong Bearish" or "Bearish" => "var(--accent-red)",
+                    _ => "var(--accent-amber)"
+                };
+
+                <div class="card" style="margin-bottom: 8px; border-left: 3px solid @biasColor; padding: 12px 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <i class="ph-duotone ph-bell-ringing" style="color: var(--accent-amber);"></i>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text-heading);">@alert.Symbol</span>
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">@alert.AlertMessage</span>
+                        </div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">
+                            @alert.ScannedAt.ToLocalTime().ToString("HH:mm:ss")
+                        </span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Watchlist Table -->
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-cyan); animation: spin 1s linear infinite;"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">Loading watchlist...</p>
+        </div>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-binoculars" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Your watchlist is empty.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Add symbols above to start automatic background scanning.</p>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <span style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);">
+                    <i class="ph-light ph-list" style="margin-right: 6px;"></i>WATCHLIST (@_items.Count / 20)
+                </span>
+            </div>
+
+            <!-- Header -->
+            <div class="watchlist-row watchlist-header">
+                <span>Symbol</span>
+                <span>Status</span>
+                <span>Interval</span>
+                <span>AI</span>
+                <span>Last Scan</span>
+                <span>Patterns</span>
+                <span>Bias</span>
+                <span>Actions</span>
+            </div>
+
+            @foreach (var item in _items)
+            {
+                var biasColor = item.LastBias switch
+                {
+                                            "Strong Bullish" or "Bullish" => "var(--accent-green)",
+                                            "Strong Bearish" or "Bearish" => "var(--accent-red)",
+                                            "Neutral" => "var(--accent-amber)",
+                    _ => "var(--text-muted)"
+                };
+
+                var recentNotif = _recentScans.FirstOrDefault(n => n.Symbol == item.Symbol);
+
+                <div class="watchlist-row @(!item.IsActive ? "watchlist-inactive" : "") @(recentNotif is not null ? "watchlist-scanned" : "")">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text-heading);">
+                        @item.Symbol
+                    </span>
+                    <span>
+                        @if (item.IsActive)
+                        {
+                            <span class="override-badge override-accepted" style="font-size: 0.6rem;">Active</span>
+                        }
+                        else
+                        {
+                            <span class="override-badge override-rejected" style="font-size: 0.6rem;">Paused</span>
+                        }
+                    </span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary);">
+                        @FormatInterval(item.ScanIntervalMinutes)
+                    </span>
+                    <span>
+                        @if (item.EnableAI)
+                        {
+                            <i class="ph-duotone ph-robot" style="color: var(--accent-cyan);"></i>
+                        }
+                        else
+                        {
+                            <i class="ph ph-robot" style="color: var(--text-muted); opacity: 0.4;"></i>
+                        }
+                    </span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted);">
+                        @(item.LastScannedAt.HasValue? item.LastScannedAt.Value.ToLocalTime().ToString("HH:mm") : "\u2014")
+                    </span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">
+                        @if (item.LastPatternCount > 0)
+                        {
+                            <span style="color: var(--accent-cyan);">@item.LastPatternCount</span>
+                        }
+                        else
+                        {
+                            <span style="color: var(--text-muted);">0</span>
+                        }
+                    </span>
+                    <span style="font-size: 0.8rem; color: @biasColor; font-weight: 600;">
+                        @(item.LastBias ?? "\u2014")
+                    </span>
+                    <span style="display: flex; gap: 6px;">
+                        <button class="watchlist-btn" title="@(item.IsActive ? "Pause" : "Resume")"
+                                @onclick="() => ToggleActive(item)">
+                            <i class="ph @(item.IsActive ? "ph-pause" : "ph-play")" style="font-size: 0.85rem;"></i>
+                        </button>
+                        <button class="watchlist-btn" title="View in Scanner"
+                                @onclick="() => OpenInScanner(item.Symbol)">
+                            <i class="ph ph-crosshair" style="font-size: 0.85rem;"></i>
+                        </button>
+                        <button class="watchlist-btn watchlist-btn-danger" title="Remove"
+                                @onclick="() => RemoveItem(item)">
+                            <i class="ph ph-trash" style="font-size: 0.85rem;"></i>
+                        </button>
+                    </span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<WatchlistItemData> _items = new();
+    private List<ScanNotificationData> _alerts = new();
+    private List<ScanNotificationData> _recentScans = new();
+    private HubConnection? _hubConnection;
+
+    private string _newSymbol = "";
+    private int _newInterval = 30;
+    private decimal _newMinConf = 60;
+    private string _newEnableAI = "true";
+
+    private bool _loading = true;
+    private bool _adding;
+    private bool _loaded;
+    private bool _hubConnected;
+    private string? _error;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _items = await WatchlistApi.GetWatchlistAsync();
+        _loading = false;
+        StateHasChanged();
+
+        await ConnectToHub();
+    }
+
+    private async Task ConnectToHub()
+    {
+        try
+        {
+            var token = AuthState.Token;
+            var baseUri = Nav.BaseUri.TrimEnd('/');
+
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl($"{baseUri}/hubs/pattern-scan", options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                })
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<ScanNotificationData>("ScanCompleted", OnScanCompleted);
+            _hubConnection.On<ScanNotificationData>("PatternAlert", OnPatternAlert);
+
+            _hubConnection.Closed += _ =>
+            {
+                _hubConnected = false;
+                InvokeAsync(StateHasChanged);
+                return Task.CompletedTask;
+            };
+
+            _hubConnection.Reconnected += _ =>
+            {
+                _hubConnected = true;
+                InvokeAsync(StateHasChanged);
+                return Task.CompletedTask;
+            };
+
+            await _hubConnection.StartAsync();
+            _hubConnected = true;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            _hubConnected = false;
+            Console.WriteLine($"SignalR connection failed: {ex.Message}");
+        }
+    }
+
+    private async Task OnScanCompleted(ScanNotificationData notification)
+    {
+        var item = _items.FirstOrDefault(i => i.Symbol == notification.Symbol);
+        if (item is not null)
+        {
+            item.LastScannedAt = notification.ScannedAt;
+            item.LastPatternCount = notification.PatternCount;
+            item.LastBias = notification.OverallBias;
+        }
+
+        _recentScans.Add(notification);
+        await InvokeAsync(StateHasChanged);
+
+        _ = Task.Delay(3000).ContinueWith(_ =>
+        {
+            _recentScans.Remove(notification);
+            InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private async Task OnPatternAlert(ScanNotificationData notification)
+    {
+        _alerts.Insert(0, notification);
+        if (_alerts.Count > 20) _alerts.RemoveAt(_alerts.Count - 1);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task AddSymbol()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_newSymbol))
+        {
+            _error = "Please enter a symbol.";
+            return;
+        }
+
+        _adding = true;
+        StateHasChanged();
+
+        var result = await WatchlistApi.AddSymbolAsync(
+            _newSymbol.Trim().ToUpper(),
+            _newEnableAI == "true",
+            _newMinConf,
+            _newInterval);
+
+        if (result is not null)
+        {
+            _items.Add(result);
+            _newSymbol = "";
+        }
+        else
+        {
+            _error = "Failed to add symbol. It may already be on your watchlist.";
+        }
+
+        _adding = false;
+        StateHasChanged();
+    }
+
+    private async Task QuickAdd(string ticker)
+    {
+        _newSymbol = ticker;
+        await AddSymbol();
+    }
+
+    private async Task ToggleActive(WatchlistItemData item)
+    {
+        item.IsActive = !item.IsActive;
+        await WatchlistApi.UpdateItemAsync(item.Id, item.IsActive, item.EnableAI, item.MinConfidence, item.ScanIntervalMinutes);
+        StateHasChanged();
+    }
+
+    private async Task RemoveItem(WatchlistItemData item)
+    {
+        var success = await WatchlistApi.RemoveItemAsync(item.Id);
+        if (success) _items.Remove(item);
+        StateHasChanged();
+    }
+
+    private void OpenInScanner(string symbol)
+    {
+        Nav.NavigateTo($"/scanner?symbol={symbol}");
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddSymbol();
+    }
+
+    private string FormatInterval(int minutes)
+    {
+        if (minutes < 60) return $"{minutes}m";
+        if (minutes == 60) return "1h";
+        if (minutes < 1440) return $"{minutes / 60}h";
+        return "Daily";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

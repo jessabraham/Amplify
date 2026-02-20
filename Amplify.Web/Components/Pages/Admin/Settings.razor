@@ -1,0 +1,351 @@
+﻿@page "/admin/settings"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject SettingsApiClient SettingsApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <h1 style="margin-bottom: 28px;">
+        <i class="ph-duotone ph-gear" style="margin-right: 8px; color: var(--accent-cyan);"></i>Settings
+    </h1>
+
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-blue); animation: spin 1s linear infinite;"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">Loading settings...</p>
+        </div>
+    }
+    else
+    {
+        <!-- User Profile Section -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-user-circle" style="margin-right: 6px;"></i>User Profile</span>
+                @if (_profile is not null)
+                {
+                    <span class="override-badge override-accepted" style="font-size: 0.65rem;">@_profile.Role</span>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_profileSuccess))
+            {
+                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--accent-green);">
+                    <i class="ph-bold ph-check-circle" style="margin-right: 6px;"></i>@_profileSuccess
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_profileError))
+            {
+                <div class="login-error" style="margin-bottom: 16px;">
+                    <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_profileError
+                </div>
+            }
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div class="form-group">
+                    <label><i class="ph-light ph-user" style="margin-right: 4px;"></i>Display Name</label>
+                    <input type="text" @bind="_displayName" />
+                </div>
+                <div class="form-group">
+                    <label><i class="ph-light ph-envelope" style="margin-right: 4px;"></i>Email</label>
+                    <input type="email" @bind="_email" />
+                </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <button class="btn btn-primary" @onclick="SaveProfile" disabled="@_savingProfile">
+                    @if (_savingProfile)
+                    {
+                        <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                    }
+                    else
+                    {
+                        <i class="ph-bold ph-floppy-disk"></i>
+                    }
+                    <span>Save Profile</span>
+                </button>
+                @if (_profile is not null)
+                {
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">
+                        <i class="ph-light ph-calendar" style="margin-right: 3px;"></i>Member since @_profile.CreatedAt.ToString("MMM dd, yyyy")
+                        @if (_profile.LastLoginUtc.HasValue)
+                        {
+                            <span style="margin-left: 12px;">
+                                <i class="ph-light ph-clock" style="margin-right: 3px;"></i>Last login @_profile.LastLoginUtc.Value.ToString("MMM dd, HH:mm")
+                            </span>
+                        }
+                    </span>
+                }
+            </div>
+
+            <!-- Change Password -->
+            <hr style="border-color: var(--border); margin: 20px 0;" />
+            <h3 style="margin-bottom: 12px; font-size: 0.9rem;">
+                <i class="ph-light ph-lock" style="margin-right: 4px;"></i>Change Password
+            </h3>
+
+            @if (!string.IsNullOrEmpty(_passwordSuccess))
+            {
+                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--accent-green);">
+                    <i class="ph-bold ph-check-circle" style="margin-right: 6px;"></i>@_passwordSuccess
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_passwordError))
+            {
+                <div class="login-error" style="margin-bottom: 16px;">
+                    <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_passwordError
+                </div>
+            }
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" @bind="_currentPassword" />
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" @bind="_newPassword" />
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" @bind="_confirmPassword" />
+                </div>
+            </div>
+
+            <button class="btn btn-secondary" @onclick="ChangePassword" disabled="@_changingPassword">
+                @if (_changingPassword)
+                {
+                    <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                }
+                else
+                {
+                    <i class="ph-bold ph-key"></i>
+                }
+                <span>Change Password</span>
+            </button>
+        </div>
+
+        <!-- AI Model Config Section -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-robot" style="margin-right: 6px;"></i>AI Model Configuration</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);">
+                    <i class="ph-light ph-cpu" style="margin-right: 3px;"></i>Ollama Local
+                </span>
+            </div>
+
+            @if (_aiConfig is not null)
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-link" style="margin-right: 4px;"></i>Base URL</div>
+                        <div class="settings-info-value">@_aiConfig.BaseUrl</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-brain" style="margin-right: 4px;"></i>Model</div>
+                        <div class="settings-info-value">@_aiConfig.Model</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-thermometer" style="margin-right: 4px;"></i>Temperature</div>
+                        <div class="settings-info-value">@_aiConfig.Temperature</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-text-aa" style="margin-right: 4px;"></i>Max Tokens</div>
+                        <div class="settings-info-value">@_aiConfig.MaxTokens.ToString("#,##0")</div>
+                    </div>
+                </div>
+
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px;">
+                    <i class="ph-light ph-info" style="margin-right: 4px;"></i>AI config is managed in appsettings.json. Restart the API to apply changes.
+                </p>
+            }
+            else
+            {
+                <p style="color: var(--text-muted);">Unable to load AI config.</p>
+            }
+        </div>
+
+        <!-- Risk Defaults Section -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-shield-warning" style="margin-right: 6px;"></i>Risk Defaults</span>
+            </div>
+
+            @if (_riskConfig is not null)
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-percent" style="margin-right: 4px;"></i>Default Risk %</div>
+                        <div class="settings-info-value" style="color: var(--accent-amber);">@_riskConfig.DefaultRiskPercent%</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-warning" style="margin-right: 4px;"></i>Max Risk %</div>
+                        <div class="settings-info-value" style="color: var(--accent-red);">@_riskConfig.MaxRiskPercent%</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-currency-dollar" style="margin-right: 4px;"></i>Max Position Size</div>
+                        <div class="settings-info-value">@_riskConfig.MaxPositionSize.ToString("$#,##0")</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-wallet" style="margin-right: 4px;"></i>Default Portfolio Size</div>
+                        <div class="settings-info-value">@_riskConfig.DefaultPortfolioSize.ToString("$#,##0")</div>
+                    </div>
+                </div>
+
+                <!-- Risk gauge -->
+                <div style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-size: 0.7rem; color: var(--text-muted);">Risk Tolerance</span>
+                        <span style="font-size: 0.7rem; color: var(--text-muted);">@_riskConfig.DefaultRiskPercent% of @_riskConfig.MaxRiskPercent% max</span>
+                    </div>
+                    <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--accent-green), var(--accent-amber), var(--accent-red));">
+                        <div style="position: absolute; top: -4px; left: @(_riskGaugePosition)%; width: 16px; height: 16px; background: white; border-radius: 50%; border: 2px solid var(--accent-amber); transform: translateX(-50%);"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                        <span style="font-size: 0.6rem; color: var(--text-muted);">0%</span>
+                        <span style="font-size: 0.6rem; color: var(--text-muted);">5%</span>
+                    </div>
+                </div>
+
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px;">
+                    <i class="ph-light ph-info" style="margin-right: 4px;"></i>Risk config is managed in appsettings.json. Restart the API to apply changes.
+                </p>
+            }
+            else
+            {
+                <p style="color: var(--text-muted);">Unable to load risk config.</p>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _loaded;
+
+    // Profile
+    private ProfileData? _profile;
+    private string _displayName = "";
+    private string _email = "";
+    private bool _savingProfile;
+    private string? _profileSuccess;
+    private string? _profileError;
+
+    // Password
+    private string _currentPassword = "";
+    private string _newPassword = "";
+    private string _confirmPassword = "";
+    private bool _changingPassword;
+    private string? _passwordSuccess;
+    private string? _passwordError;
+
+    // AI Config
+    private AIConfigData? _aiConfig;
+
+    // Risk Config
+    private RiskConfigData? _riskConfig;
+    private double _riskGaugePosition;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _profile = await SettingsApi.GetProfileAsync();
+            if (_profile is not null)
+            {
+                _displayName = _profile.DisplayName;
+                _email = _profile.Email;
+            }
+
+            _aiConfig = await SettingsApi.GetAIConfigAsync();
+            _riskConfig = await SettingsApi.GetRiskConfigAsync();
+
+            if (_riskConfig is not null)
+            {
+                _riskGaugePosition = Math.Min(_riskConfig.DefaultRiskPercent / 5.0 * 100, 100);
+            }
+        }
+        catch
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        finally { _loading = false; }
+
+        StateHasChanged();
+    }
+
+    private async Task SaveProfile()
+    {
+        _profileSuccess = null;
+        _profileError = null;
+
+        if (string.IsNullOrWhiteSpace(_displayName))
+        {
+            _profileError = "Display name is required.";
+            return;
+        }
+
+        _savingProfile = true;
+        var error = await SettingsApi.UpdateProfileAsync(_displayName.Trim(), _email.Trim());
+        _savingProfile = false;
+
+        if (error is null)
+            _profileSuccess = "Profile updated successfully.";
+        else
+            _profileError = error;
+    }
+
+    private async Task ChangePassword()
+    {
+        _passwordSuccess = null;
+        _passwordError = null;
+
+        if (string.IsNullOrWhiteSpace(_currentPassword))
+        {
+            _passwordError = "Current password is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newPassword) || _newPassword.Length < 6)
+        {
+            _passwordError = "New password must be at least 6 characters.";
+            return;
+        }
+
+        if (_newPassword != _confirmPassword)
+        {
+            _passwordError = "Passwords do not match.";
+            return;
+        }
+
+        _changingPassword = true;
+        var error = await SettingsApi.ChangePasswordAsync(_currentPassword, _newPassword);
+        _changingPassword = false;
+
+        if (error is null)
+        {
+            _passwordSuccess = "Password changed successfully.";
+            _currentPassword = "";
+            _newPassword = "";
+            _confirmPassword = "";
+        }
+        else
+        {
+            _passwordError = error;
+        }
+    }
+}

@@ -1,0 +1,84 @@
+﻿@page "/login"
+@layout EmptyLayout
+@inject AuthApiClient AuthApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="login-wrapper">
+    <div class="login-card fade-in">
+        <div class="login-brand">
+            <i class="ph-duotone ph-pulse" style="font-size: 2.5rem; color: var(--accent-cyan); display: block; margin-bottom: 12px;"></i>
+            <div class="logo-text">Amplify</div>
+            <div class="tagline">Trading Advisory System</div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="login-error">
+                <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@errorMessage
+            </div>
+        }
+
+        <div class="form-group">
+            <label><i class="ph-light ph-envelope" style="margin-right: 4px;"></i>Email</label>
+            <input type="email" @bind="email" placeholder="Enter your email" />
+        </div>
+        <div class="form-group">
+            <label><i class="ph-light ph-lock" style="margin-right: 4px;"></i>Password</label>
+            <input type="password" @bind="password" placeholder="Enter your password" />
+        </div>
+        <button @onclick="HandleLogin" disabled="@isLoading" class="btn-login">
+            @if (isLoading)
+            {
+                <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite; margin-right: 6px;"></i>
+                <span>Authenticating...</span>
+            }
+            else
+            {
+                <i class="ph-bold ph-sign-in" style="margin-right: 6px;"></i>
+                <span>Sign In</span>
+            }
+        </button>
+    </div>
+</div>
+
+@code {
+    private string email = "";
+    private string password = "";
+    private string? errorMessage;
+    private bool isLoading;
+
+    private async Task HandleLogin()
+    {
+        errorMessage = null;
+        isLoading = true;
+
+        try
+        {
+            var dto = new Amplify.Application.Common.DTOs.Admin.LoginDto
+            {
+                Email = email,
+                Password = password
+            };
+
+            var result = await AuthApi.LoginAsync(dto);
+
+            if (result is null)
+            {
+                errorMessage = "Invalid email or password.";
+                return;
+            }
+
+            await AuthState.SetTokenAsync(result.Token);
+            Nav.NavigateTo("/dashboard", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Connection error: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="Amplify.API/Amplify.API.csproj" />
+  <Project Path="Amplify.Application/Amplify.Application.csproj" />
+  <Project Path="Amplify.Domain/Amplify.Domain.csproj" />
+  <Project Path="Amplify.Infrastructure/Amplify.Infrastructure.csproj" Id="6fe372f8-16c5-41e1-a257-067e2e80853b" />
+  <Project Path="Amplify.Web/Amplify.Web.csproj" />
+  <Project Path="BlazorApp1/BlazorApp1.csproj" Id="b2b4e9b3-328b-47fa-94a7-30fdd79f9460" />
+</Solution>

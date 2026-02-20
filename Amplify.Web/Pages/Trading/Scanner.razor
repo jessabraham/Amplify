@@ -1,0 +1,415 @@
+﻿@page "/scanner"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject PatternScannerApiClient ScannerApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-crosshair" style="margin-right: 8px; color: var(--accent-cyan);"></i>Pattern Scanner</h1>
+    </div>
+
+    <!-- Scan Controls -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;">
+            <div class="form-group" style="margin-bottom: 0; min-width: 160px;">
+                <label><i class="ph-light ph-chart-bar" style="margin-right: 4px;"></i>Symbol</label>
+                <input type="text" @bind="_symbol" placeholder="AAPL, TSLA, MSFT..." @onkeydown="HandleKeyDown" />
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 130px;">
+                <label><i class="ph-light ph-star" style="margin-right: 4px;"></i>Min Confidence</label>
+                <select @bind="_minConfidence">
+                    <option value="0">All</option>
+                    <option value="50">50+</option>
+                    <option value="60">60+</option>
+                    <option value="70">70+</option>
+                    <option value="80">80+</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 130px;">
+                <label><i class="ph-light ph-arrows-down-up" style="margin-right: 4px;"></i>Direction</label>
+                <select @bind="_direction">
+                    <option value="All">All</option>
+                    <option value="Bullish">Bullish</option>
+                    <option value="Bearish">Bearish</option>
+                    <option value="Neutral">Neutral</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0; min-width: 130px;">
+                <label><i class="ph-light ph-robot" style="margin-right: 4px;"></i>AI Analysis</label>
+                <select @bind="_enableAI">
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" @onclick="RunScan" disabled="@_scanning" style="height: 40px;">
+                @if (_scanning)
+                {
+                    <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                    <span>@(_enableAI == "true" ? "AI Analyzing..." : "Scanning...")</span>
+                }
+                else
+                {
+                    <i class="ph-bold ph-magnifying-glass"></i>
+                    <span>Scan</span>
+                }
+            </button>
+        </div>
+
+        <!-- Quick scan buttons -->
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">Quick:</span>
+            @foreach (var ticker in new[] { "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "AMZN", "META" })
+            {
+                var t = ticker;
+                <button class="btn-chip @(_symbol.ToUpper() == t ? "active" : "")" @onclick="() => QuickScan(t)">@t</button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="login-error" style="margin-bottom: 20px;">
+            <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error
+        </div>
+    }
+
+    @if (_result is not null)
+    {
+        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+            <span style="font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-heading);">
+                @_result.Symbol
+            </span>
+            <span style="font-family: 'JetBrains Mono', monospace; color: var(--accent-blue);">
+                @_result.CurrentPrice.ToString("C")
+            </span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">
+                @_result.TotalPatterns patterns detected
+            </span>
+        </div>
+
+        <!-- AI Analysis Panel -->
+        @if (_result.AIAnalysis is not null)
+        {
+            var ai = _result.AIAnalysis;
+            var biasColor = ai.OverallBias switch
+            {
+                            "Strong Bullish" or "Bullish" => "var(--accent-green)",
+                            "Strong Bearish" or "Bearish" => "var(--accent-red)",
+                _ => "var(--accent-amber)"
+            };
+            var actionColor = ai.RecommendedAction switch
+            {
+                            "Buy" => "var(--accent-green)",
+                            "Sell" => "var(--accent-red)",
+                _ => "var(--accent-amber)"
+            };
+            var biasIcon = ai.OverallBias switch
+            {
+                            "Strong Bullish" or "Bullish" => "ph-trend-up",
+                            "Strong Bearish" or "Bearish" => "ph-trend-down",
+                _ => "ph-minus"
+            };
+
+            <div class="card ai-panel" style="margin-bottom: 20px; border-left: 3px solid @biasColor;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <i class="ph-duotone ph-robot" style="font-size: 1.2rem; color: var(--accent-cyan);"></i>
+                    <span style="font-size: 1rem; font-weight: 700; color: var(--text-heading);">AI Analysis</span>
+                    <span style="font-size: 0.6rem; background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); padding: 2px 8px; border-radius: 10px;">Ollama</span>
+                </div>
+
+                <!-- Bias + Action + Confidence Row -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Overall Bias</div>
+                        <div class="pattern-level-value" style="color: @biasColor;">
+                            <i class="ph-bold @biasIcon" style="margin-right: 3px;"></i>@ai.OverallBias
+                        </div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">AI Confidence</div>
+                        <div class="pattern-level-value" style="color: var(--accent-cyan);">@ai.OverallConfidence%</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Action</div>
+                        <div class="pattern-level-value" style="color: @actionColor; font-weight: 700;">@ai.RecommendedAction</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Risk : Reward</div>
+                        <div class="pattern-level-value" style="color: var(--accent-blue);">@ai.RiskReward</div>
+                    </div>
+                </div>
+
+                <!-- AI Recommended Levels -->
+                @if (ai.RecommendedEntry.HasValue)
+                {
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">AI Entry</div>
+                            <div class="pattern-level-value" style="color: var(--accent-blue);">@ai.RecommendedEntry.Value.ToString("C")</div>
+                        </div>
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">AI Stop</div>
+                            <div class="pattern-level-value" style="color: var(--accent-red);">@(ai.RecommendedStop?.ToString("C") ?? "—")</div>
+                        </div>
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">AI Target</div>
+                            <div class="pattern-level-value" style="color: var(--accent-green);">@(ai.RecommendedTarget?.ToString("C") ?? "—")</div>
+                        </div>
+                    </div>
+                }
+
+                <!-- Summary -->
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 6px;">Summary</div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin: 0;">@ai.Summary</p>
+                </div>
+
+                <!-- Detailed Analysis (collapsible) -->
+                @if (!string.IsNullOrEmpty(ai.DetailedAnalysis))
+                {
+                    <div style="margin-bottom: 12px;">
+                        <button class="btn-chip" style="margin-bottom: 8px;" @onclick="() => _showDetail = !_showDetail">
+                            <i class="ph @(_showDetail ? "ph-caret-up" : "ph-caret-down")" style="margin-right: 4px;"></i>
+                            @(_showDetail ? "Hide" : "Show") Detailed Analysis
+                        </button>
+                        @if (_showDetail)
+                        {
+                            <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6; margin: 0; padding: 12px; background: var(--bg-input); border-radius: var(--radius-sm);">@ai.DetailedAnalysis</p>
+                        }
+                    </div>
+                }
+
+                <!-- Pattern Verdicts Table -->
+                @if (_result.AIAnalysis?.OverallBias is not null && _result.Patterns.Any(p => !string.IsNullOrEmpty(p.AIGrade)))
+                {
+                    <div>
+                        <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">Pattern Verdicts</div>
+                        @foreach (var p in _result.Patterns.Where(p => !string.IsNullOrEmpty(p.AIGrade)))
+                        {
+                            var gradeColor = p.AIGrade switch
+                            {
+                                                    "A+" or "A" => "var(--accent-green)",
+                                                    "B+" or "B" => "var(--accent-cyan)",
+                                                    "C" => "var(--accent-amber)",
+                                _ => "var(--accent-red)"
+                            };
+
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border);">
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 700; color: @gradeColor; min-width: 28px;">@p.AIGrade</span>
+                                <span style="font-size: 0.7rem; min-width: 16px;">@(p.AIValid ? "✓" : "✗")</span>
+                                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-heading); min-width: 160px;">@p.PatternName</span>
+                                <span style="font-size: 0.75rem; color: var(--text-muted);">@p.AIReason</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- Stats Summary -->
+        @if (_result.Patterns.Count > 0)
+        {
+            <div class="stats-row" style="margin-bottom: 20px;">
+                <div class="stat-card">
+                    <div class="stat-label"><i class="ph-light ph-trend-up" style="margin-right: 4px;"></i>Bullish</div>
+                    <div class="stat-value positive">@_result.Patterns.Count(p => p.Direction == "Bullish")</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label"><i class="ph-light ph-trend-down" style="margin-right: 4px;"></i>Bearish</div>
+                    <div class="stat-value negative">@_result.Patterns.Count(p => p.Direction == "Bearish")</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label"><i class="ph-light ph-minus" style="margin-right: 4px;"></i>Neutral</div>
+                    <div class="stat-value">@_result.Patterns.Count(p => p.Direction == "Neutral")</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label"><i class="ph-light ph-star" style="margin-right: 4px;"></i>Avg Confidence</div>
+                    <div class="stat-value" style="color: var(--accent-cyan);">@(_result.Patterns.Average(p => p.Confidence).ToString("F0"))%</div>
+                </div>
+            </div>
+
+            <!-- Pattern Cards -->
+            <div class="pattern-grid">
+                @foreach (var p in _result.Patterns)
+                {
+                    var dirColor = p.Direction switch
+                    {
+                                        "Bullish" => "var(--accent-green)",
+                                        "Bearish" => "var(--accent-red)",
+                        _ => "var(--accent-amber)"
+                    };
+                    var dirIcon = p.Direction switch
+                    {
+                                        "Bullish" => "ph-trend-up",
+                                        "Bearish" => "ph-trend-down",
+                        _ => "ph-minus"
+                    };
+                    var dirBadgeClass = p.Direction switch
+                    {
+                                        "Bullish" => "override-accepted",
+                                        "Bearish" => "override-rejected",
+                        _ => "override-modified"
+                    };
+                    var confLevel = p.Confidence >= 75 ? "high" : p.Confidence >= 60 ? "medium" : "low";
+                    var gradeColor = p.AIGrade switch
+                    {
+                                        "A+" or "A" => "var(--accent-green)",
+                                        "B+" or "B" => "var(--accent-cyan)",
+                                        "C" => "var(--accent-amber)",
+                        _ => "var(--accent-red)"
+                    };
+
+                    <div class="card pattern-card" style="border-left: 3px solid @dirColor; @(!p.AIValid ? "opacity: 0.5;" : "")">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                            <div>
+                                <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin-bottom: 4px;">
+                                    <i class="ph-bold @dirIcon" style="color: @dirColor; margin-right: 4px;"></i>@p.PatternName
+                                </div>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <span class="override-badge @dirBadgeClass" style="font-size: 0.6rem;">@p.Direction</span>
+                                    @if (!string.IsNullOrEmpty(p.AIGrade))
+                                    {
+                                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 700; color: @gradeColor; background: rgba(0,0,0,0.3); padding: 1px 6px; border-radius: 4px;">
+                                            AI: @p.AIGrade
+                                        </span>
+                                    }
+                                    @if (!p.AIValid)
+                                    {
+                                        <span style="font-size: 0.6rem; color: var(--accent-red);">
+                                            <i class="ph-bold ph-x-circle"></i> AI Rejected
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: @dirColor;">@p.Confidence%</div>
+                                <div style="font-size: 0.6rem; color: var(--text-muted);">confidence</div>
+                            </div>
+                        </div>
+
+                        <div class="score-bar" style="margin-bottom: 10px;">
+                            <div class="score-bar-fill @confLevel" style="width: @(p.Confidence)%"></div>
+                        </div>
+
+                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px;">@p.Description</p>
+
+                        @if (!string.IsNullOrEmpty(p.AIReason))
+                        {
+                            <p style="font-size: 0.75rem; color: var(--accent-cyan); line-height: 1.4; margin-bottom: 12px; font-style: italic;">
+                                <i class="ph ph-robot" style="margin-right: 4px;"></i>@p.AIReason
+                            </p>
+                        }
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px;">
+                            <div class="pattern-level">
+                                <div class="pattern-level-label">Win Rate</div>
+                                <div class="pattern-level-value" style="color: var(--accent-cyan);">@p.HistoricalWinRate%</div>
+                            </div>
+                            <div class="pattern-level">
+                                <div class="pattern-level-label">Entry</div>
+                                <div class="pattern-level-value" style="color: var(--accent-blue);">@p.SuggestedEntry.ToString("C")</div>
+                            </div>
+                            <div class="pattern-level">
+                                <div class="pattern-level-label">Stop</div>
+                                <div class="pattern-level-value" style="color: var(--accent-red);">@p.SuggestedStop.ToString("C")</div>
+                            </div>
+                            <div class="pattern-level">
+                                <div class="pattern-level-label">Target</div>
+                                <div class="pattern-level-value" style="color: var(--accent-green);">@p.SuggestedTarget.ToString("C")</div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="card" style="text-align: center; padding: 40px;">
+                <i class="ph-thin ph-binoculars" style="font-size: 2.5rem; color: var(--text-muted);"></i>
+                <p style="color: var(--text-muted); margin-top: 12px;">No patterns match your filters. Try lowering the confidence threshold.</p>
+            </div>
+        }
+    }
+    else if (!_scanning && !_hasScanned)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-crosshair" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Enter a symbol and scan for patterns.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">The engine detects 27+ patterns, then AI validates and synthesizes a trade recommendation.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private string _symbol = "";
+    private decimal _minConfidence = 0;
+    private string _direction = "All";
+    private string _enableAI = "true";
+    private bool _scanning;
+    private bool _hasScanned;
+    private bool _showDetail;
+    private string? _error;
+    private ScanResultData? _result;
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+            Nav.NavigateTo("/login");
+    }
+
+    private async Task RunScan()
+    {
+        _error = null;
+        _result = null;
+        _showDetail = false;
+
+        if (string.IsNullOrWhiteSpace(_symbol))
+        {
+            _error = "Please enter a symbol.";
+            return;
+        }
+
+        _scanning = true;
+        _hasScanned = true;
+        StateHasChanged();
+
+        try
+        {
+            _result = await ScannerApi.ScanSymbolAsync(
+                _symbol.Trim().ToUpper(),
+                _minConfidence,
+                _direction,
+                "Daily",
+                _enableAI == "true");
+
+            if (_result is null)
+                _error = "Failed to scan. Please try again.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error: {ex.Message}";
+        }
+
+        _scanning = false;
+        StateHasChanged();
+    }
+
+    private async Task QuickScan(string ticker)
+    {
+        _symbol = ticker;
+        await RunScan();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await RunScan();
+    }
+}

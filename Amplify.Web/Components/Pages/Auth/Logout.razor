@@ -1,0 +1,18 @@
+﻿@page "/logout"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+@code {
+    private bool _done;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _done) return;
+        _done = true;
+
+        await AuthState.LogoutAsync();
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

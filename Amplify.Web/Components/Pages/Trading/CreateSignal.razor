@@ -1,0 +1,198 @@
+﻿@page "/signals/create"
+@rendermode InteractiveServer
+@using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Web.Services
+@using Amplify.Domain.Enumerations
+@inject SignalApiClient SignalApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 28px;">
+        <button class="btn btn-secondary" @onclick="GoBack">
+            <i class="ph ph-arrow-left"></i> Back
+        </button>
+        <h1><i class="ph-duotone ph-plus-circle" style="color: var(--accent-cyan); margin-right: 8px;"></i>New Signal</h1>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="login-error" style="max-width: 720px; margin-bottom: 20px;">
+            <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error
+        </div>
+    }
+
+    <div class="card" style="max-width: 720px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- Asset -->
+            <div class="form-group">
+                <label><i class="ph-light ph-currency-dollar" style="margin-right: 4px;"></i>Asset Symbol</label>
+                <input type="text" @bind="_dto.Asset" placeholder="e.g. AAPL, TSLA, BTC" />
+            </div>
+
+            <!-- Asset Class -->
+            <div class="form-group">
+                <label><i class="ph-light ph-tag" style="margin-right: 4px;"></i>Asset Class</label>
+                <select @bind="_dto.AssetClass">
+                    @foreach (var val in Enum.GetValues<AssetClass>())
+                    {
+                        <option value="@val">@val</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Signal Type -->
+            <div class="form-group">
+                <label><i class="ph-light ph-trend-up" style="margin-right: 4px;"></i>Signal Type</label>
+                <select @bind="_dto.SignalType">
+                    @foreach (var val in Enum.GetValues<SignalType>())
+                    {
+                        <option value="@val">@val</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Regime -->
+            <div class="form-group">
+                <label><i class="ph-light ph-wave-sine" style="margin-right: 4px;"></i>Market Regime</label>
+                <select @bind="_dto.Regime">
+                    @foreach (var val in Enum.GetValues<MarketRegime>())
+                    {
+                        <option value="@val">@val</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Setup Score -->
+            <div class="form-group">
+                <label><i class="ph-light ph-star" style="margin-right: 4px;"></i>Setup Score (0-100)</label>
+                <input type="number" @bind="_dto.SetupScore" min="0" max="100" step="0.1" />
+            </div>
+
+            <!-- Risk Percent -->
+            <div class="form-group">
+                <label><i class="ph-light ph-warning" style="margin-right: 4px;"></i>Risk %</label>
+                <input type="number" @bind="_dto.RiskPercent" min="0" max="100" step="0.1" />
+            </div>
+        </div>
+
+        <hr style="border-color: var(--border); margin: 24px 0;" />
+
+        <h3 style="margin-bottom: 16px;">
+            <i class="ph-duotone ph-chart-line" style="color: var(--accent-blue); margin-right: 6px;"></i>Price Levels
+        </h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- Entry Price -->
+            <div class="form-group">
+                <label><i class="ph-light ph-sign-in" style="margin-right: 4px;"></i>Entry Price</label>
+                <input type="number" @bind="_dto.EntryPrice" min="0" step="0.01" />
+            </div>
+
+            <!-- Stop Loss -->
+            <div class="form-group">
+                <label><i class="ph-light ph-shield-warning" style="margin-right: 4px;"></i>Stop Loss</label>
+                <input type="number" @bind="_dto.StopLoss" min="0" step="0.01" />
+            </div>
+
+            <!-- Target 1 -->
+            <div class="form-group">
+                <label><i class="ph-light ph-target" style="margin-right: 4px;"></i>Target 1</label>
+                <input type="number" @bind="_dto.Target1" min="0" step="0.01" />
+            </div>
+
+            <!-- Target 2 -->
+            <div class="form-group">
+                <label><i class="ph-light ph-target" style="margin-right: 4px;"></i>Target 2</label>
+                <input type="number" @bind="_dto.Target2" min="0" step="0.01" />
+            </div>
+        </div>
+
+        <div style="margin-top: 28px; display: flex; gap: 12px;">
+            <button class="btn btn-primary" @onclick="HandleCreate" disabled="@_saving">
+                @if (_saving)
+                {
+                    <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                    <span>Creating...</span>
+                }
+                else
+                {
+                    <i class="ph-bold ph-plus"></i>
+                    <span>Create Signal</span>
+                }
+            </button>
+            <button class="btn btn-secondary" @onclick="GoBack">Cancel</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private TradeSignalDto _dto = new();
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+        }
+    }
+
+    private async Task HandleCreate()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_dto.Asset))
+        {
+            _error = "Asset symbol is required.";
+            return;
+        }
+        if (_dto.EntryPrice <= 0)
+        {
+            _error = "Entry price must be greater than 0.";
+            return;
+        }
+        if (_dto.StopLoss <= 0)
+        {
+            _error = "Stop loss must be greater than 0.";
+            return;
+        }
+        if (_dto.StopLoss >= _dto.EntryPrice && _dto.SignalType == SignalType.Long)
+        {
+            _error = "Stop loss must be below entry price for Long signals.";
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            var result = await SignalApi.CreateSignalAsync(_dto);
+            if (result is not null)
+            {
+                Nav.NavigateTo("/signals", forceLoad: true);
+            }
+            else
+            {
+                _error = "Failed to create signal. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void GoBack()
+    {
+        Nav.NavigateTo("/signals");
+    }
+}

@@ -1,0 +1,87 @@
+﻿@inherits LayoutComponentBase
+
+<div class="page-wrapper">
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <img src="amplify-icon.svg" alt="Amplify" class="sidebar-logo-icon" />
+            <span class="logo-text">AMPLIFY</span>
+            <span class="version-tag">v1.0</span>
+        </div>
+        <div class="sidebar-nav">
+            <span class="sidebar-section-label">Overview</span>
+            <NavLink class="nav-link" href="dashboard" Match="NavLinkMatch.All">
+                <i class="ph ph-squares-four nav-icon-ph"></i>
+                <i class="ph-fill ph-squares-four nav-icon-ph-active"></i>
+                Dashboard
+            </NavLink>
+            <span class="sidebar-section-label">Trading</span>
+            <NavLink href="/watchlist" class="sidebar-link">
+                <i class="ph-light ph-binoculars"></i>
+                <span>Watchlist</span>
+            </NavLink>
+            <NavLink class="nav-link" href="signals" Match="NavLinkMatch.All">
+                <i class="ph ph-chart-bar nav-icon-ph"></i>
+                <i class="ph-fill ph-chart-bar nav-icon-ph-active"></i>
+                Signals
+            </NavLink>
+            <NavLink class="nav-link" href="advisor">
+                <i class="ph ph-robot nav-icon-ph"></i>
+                <i class="ph-fill ph-robot nav-icon-ph-active"></i>
+                AI Advisor
+            </NavLink>
+            <NavLink class="nav-link" href="overrides">
+                <i class="ph ph-pencil-simple nav-icon-ph"></i>
+                <i class="ph-fill ph-pencil-simple nav-icon-ph-active"></i>
+                Overrides
+            </NavLink>
+            <NavLink class="nav-link" href="scanner">
+                <i class="ph ph-crosshair nav-icon-ph"></i>
+                <i class="ph-fill ph-crosshair nav-icon-ph-active"></i>
+                Scanner
+            </NavLink>
+
+            <span class="sidebar-section-label">Analytics</span>
+            <NavLink class="nav-link" href="performance">
+                <i class="ph ph-trend-up nav-icon-ph"></i>
+                <i class="ph-fill ph-trend-up nav-icon-ph-active"></i>
+                Performance
+            </NavLink>
+            <NavLink class="nav-link" href="backtest">
+                <i class="ph ph-flask nav-icon-ph"></i>
+                <i class="ph-fill ph-flask nav-icon-ph-active"></i>
+                Backtest
+            </NavLink>
+
+            <span class="sidebar-section-label">System</span>
+            <NavLink class="nav-link" href="admin/users">
+                <i class="ph ph-users nav-icon-ph"></i>
+                <i class="ph-fill ph-users nav-icon-ph-active"></i>
+                Users
+            </NavLink>
+            <NavLink class="nav-link" href="admin/settings">
+                <i class="ph ph-gear nav-icon-ph"></i>
+                <i class="ph-fill ph-gear nav-icon-ph-active"></i>
+                Settings
+            </NavLink>
+        </div>
+        <div class="sidebar-footer">
+            <div class="user-badge" style="justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="user-avatar">SA</div>
+                    <div class="user-info">
+                        <div class="user-name">System Admin</div>
+                        <div class="user-role">Admin</div>
+                    </div>
+                </div>
+                <a href="/logout" class="btn-logout" title="Sign out">
+                    <i class="ph ph-sign-out"></i>
+                </a>
+            </div>
+        </div>
+    </nav>
+    <div class="main-content">
+        <div class="content-area">
+            @Body
+        </div>
+    </div>
+</div>

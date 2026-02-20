@@ -1,0 +1,184 @@
+﻿@page "/"
+@layout EmptyLayout
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@using Amplify.Web.Components.Layout
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+@if (!_checked)
+{
+    <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg-primary);">
+        <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-cyan); animation: spin 1s linear infinite;"></i>
+    </div>
+}
+else if (!_loggedIn)
+{
+    <div class="landing-page">
+        <!-- Hero Section -->
+        <div class="landing-hero">
+            <div class="landing-hero-content">
+                <div class="landing-badge">
+                    <img src="amplify-icon.svg" alt="" style="height: 14px; margin-right: 6px;" />
+                    AI-Powered Trading Intelligence
+                </div>
+                <h1 class="landing-title">
+                    Trade Smarter with <span class="landing-highlight">Amplify</span>
+                </h1>
+                <p class="landing-subtitle">
+                    Pattern detection, AI analysis, and real-time trade signals — all in one platform.
+                    Amplify scans markets for high-probability setups so you never miss a trade.
+                </p>
+                <div class="landing-cta">
+                    <a href="/login" class="btn btn-primary landing-btn">
+                        <i class="ph-bold ph-sign-in" style="margin-right: 6px;"></i>Sign In
+                    </a>
+                </div>
+            </div>
+            <div class="landing-hero-visual">
+                <div class="landing-card-stack">
+                    <div class="landing-preview-card lpc-1">
+                        <div class="lpc-header">
+                            <span class="lpc-symbol">TSLA</span>
+                            <span class="signal-type-badge long" style="font-size: 0.55rem;">
+                                <i class="ph-bold ph-trend-up"></i> Long
+                            </span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Pattern</span>
+                            <span class="lpc-value">Bullish Engulfing</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">AI Grade</span>
+                            <span class="lpc-value" style="color: var(--accent-green); font-weight: 700;">A</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Confidence</span>
+                            <span class="lpc-value" style="color: var(--accent-cyan);">87%</span>
+                        </div>
+                    </div>
+                    <div class="landing-preview-card lpc-2">
+                        <div class="lpc-header">
+                            <span class="lpc-symbol">NVDA</span>
+                            <span class="signal-type-badge long" style="font-size: 0.55rem;">
+                                <i class="ph-bold ph-trend-up"></i> Long
+                            </span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Pattern</span>
+                            <span class="lpc-value">Golden Cross</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">AI Grade</span>
+                            <span class="lpc-value" style="color: var(--accent-cyan); font-weight: 700;">B+</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Confidence</span>
+                            <span class="lpc-value" style="color: var(--accent-cyan);">75%</span>
+                        </div>
+                    </div>
+                    <div class="landing-preview-card lpc-3">
+                        <div class="lpc-header">
+                            <span class="lpc-symbol">AAPL</span>
+                            <span class="signal-type-badge short" style="font-size: 0.55rem;">
+                                <i class="ph-bold ph-trend-down"></i> Short
+                            </span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Pattern</span>
+                            <span class="lpc-value">Head & Shoulders</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">AI Grade</span>
+                            <span class="lpc-value" style="color: var(--accent-green); font-weight: 700;">A+</span>
+                        </div>
+                        <div class="lpc-row">
+                            <span class="lpc-label">Confidence</span>
+                            <span class="lpc-value" style="color: var(--accent-cyan);">92%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Grid -->
+        <div class="landing-features">
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan);">
+                    <i class="ph-duotone ph-crosshair"></i>
+                </div>
+                <h3>27+ Pattern Detection</h3>
+                <p>Candlestick patterns, chart formations, and technical setups — detected automatically across all your watchlist symbols.</p>
+            </div>
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(139, 92, 246, 0.1); color: #a855f7;">
+                    <i class="ph-duotone ph-robot"></i>
+                </div>
+                <h3>AI Validation</h3>
+                <p>Every detected pattern is validated by AI that grades quality, assesses risk, and synthesizes a unified trade recommendation.</p>
+            </div>
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--accent-green);">
+                    <i class="ph-duotone ph-chart-line-up"></i>
+                </div>
+                <h3>Interactive Charts</h3>
+                <p>TradingView-powered candlestick charts with SMA, Bollinger Bands, RSI, volume, and signal overlays built in.</p>
+            </div>
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(59, 130, 246, 0.1); color: var(--accent-blue);">
+                    <i class="ph-duotone ph-shield-check"></i>
+                </div>
+                <h3>Risk Management</h3>
+                <p>Automatic stop loss, targets, and position sizing. Override any signal with your reasoning — track what works over time.</p>
+            </div>
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--accent-amber);">
+                    <i class="ph-duotone ph-flask"></i>
+                </div>
+                <h3>Backtesting</h3>
+                <p>Test strategies against historical data before risking real capital. See win rates, drawdowns, and Sharpe ratios.</p>
+            </div>
+            <div class="landing-feature-card">
+                <div class="landing-feature-icon" style="background: rgba(239, 68, 68, 0.1); color: var(--accent-red);">
+                    <i class="ph-duotone ph-envelope"></i>
+                </div>
+                <h3>Email Alerts</h3>
+                <p>Get notified when high-confidence patterns form on your watchlist. Never miss a setup again.</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="landing-footer">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <img src="amplify-icon.svg" alt="" style="height: 20px;" />
+                <span style="font-weight: 700; color: var(--text-heading);">Amplify</span>
+            </div>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">AI-Powered Trading Advisory System</span>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _checked;
+    private bool _loggedIn;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            _loggedIn = state.User.Identity?.IsAuthenticated ?? false;
+        }
+        catch
+        {
+            _loggedIn = false;
+        }
+
+        _checked = true;
+
+        if (_loggedIn)
+        {
+            Nav.NavigateTo("/dashboard", forceLoad: false);
+        }
+    }
+}

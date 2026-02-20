@@ -1,0 +1,211 @@
+﻿@page "/advisor"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@using Amplify.Application.Common.DTOs.Trading
+@inject AdvisoryApiClient AdvisoryApi
+@inject SignalApiClient SignalApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <h1 style="margin-bottom: 24px;">
+        <i class="ph-duotone ph-robot" style="margin-right: 8px; color: var(--accent-cyan);"></i>AI Advisor
+    </h1>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <!-- Chat Panel -->
+        <div class="card" style="display: flex; flex-direction: column; min-height: 600px;">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-chat-circle" style="margin-right: 6px;"></i>Chat</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);">
+                    <i class="ph-light ph-cpu" style="margin-right: 3px;"></i>qwen3:8b
+                </span>
+            </div>
+
+            <!-- Messages -->
+            <div style="flex: 1; overflow-y: auto; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px;" id="chatMessages">
+                @if (_messages.Count == 0)
+                {
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                        <i class="ph-thin ph-robot" style="font-size: 3rem; display: block; margin-bottom: 12px;"></i>
+                        <p>Ask me about trade setups, market analysis, or risk management.</p>
+                        <p style="font-size: 0.8rem; margin-top: 8px;">Or select a signal to analyze from the right panel.</p>
+                    </div>
+                }
+                @foreach (var msg in _messages)
+                {
+                    <div class="chat-msg @(msg.IsUser ? "user" : "ai")">
+                        <div class="chat-msg-header">
+                            @if (msg.IsUser)
+                            {
+                                <i class="ph-fill ph-user" style="margin-right: 4px;"></i>
+                                <span>You</span>
+                            }
+                            else
+                            {
+                                <i class="ph-fill ph-robot" style="margin-right: 4px; color: var(--accent-cyan);"></i>
+                                <span style="color: var(--accent-cyan);">Amplify AI</span>
+                            }
+                            <span class="chat-time">@msg.Time.ToString("HH:mm")</span>
+                        </div>
+                        <div class="chat-msg-body">
+                            @if (msg.IsUser)
+                            {
+                                @msg.Text
+                            }
+                            else
+                            {
+                                @((MarkupString)MarkdownHelper.ToHtml(msg.Text))
+                            }
+                        </div>
+                    </div>
+                }
+                @if (_thinking)
+                {
+                    <div class="chat-msg ai">
+                        <div class="chat-msg-header">
+                            <i class="ph-fill ph-robot" style="margin-right: 4px; color: var(--accent-cyan);"></i>
+                            <span style="color: var(--accent-cyan);">Amplify AI</span>
+                        </div>
+                        <div class="chat-msg-body">
+                            <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite; margin-right: 6px;"></i>Analyzing...
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Input -->
+            <div style="display: flex; gap: 8px;">
+                <input type="text" @bind="_input" @onkeydown="HandleKeyDown"
+                       placeholder="Ask about a trade setup..." style="flex: 1;" disabled="@_thinking" />
+                <button class="btn btn-primary" @onclick="SendMessage" disabled="@_thinking">
+                    <i class="ph-bold ph-paper-plane-tilt"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Signal Analysis Panel -->
+        <div class="card" style="min-height: 600px;">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-chart-bar" style="margin-right: 6px;"></i>Analyze Signal</span>
+            </div>
+
+            @if (_signals.Count == 0)
+            {
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    <i class="ph-thin ph-chart-bar" style="font-size: 2rem;"></i>
+                    <p style="margin-top: 8px;">No signals to analyze.</p>
+                </div>
+            }
+            else
+            {
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    @foreach (var s in _signals)
+                    {
+                        var signalClass = s.SignalType.ToString().ToLower() == "short" ? "short" : "long";
+                        <div class="signal-mini-card" @onclick="() => AnalyzeSignal(s)">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem;">@s.Asset</span>
+                                    <span class="signal-type-badge @signalClass" style="margin-left: 8px; font-size: 0.6rem;">
+                                        @s.SignalType
+                                    </span>
+                                </div>
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-secondary);">@s.SetupScore.ToString("F1")</span>
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+                                Entry: @s.EntryPrice.ToString("C") · Stop: @s.StopLoss.ToString("C") · Target: @s.Target1.ToString("C")
+                            </div>
+                            <div style="margin-top: 6px;">
+                                <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 10px;">
+                                    <i class="ph ph-robot" style="margin-right: 3px;"></i> Analyze
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<ChatMessage> _messages = new();
+    private List<TradeSignalDto> _signals = new();
+    private string _input = "";
+    private bool _thinking;
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _signals = await SignalApi.GetSignalsAsync();
+        }
+        catch { }
+
+        StateHasChanged();
+    }
+
+    private async Task HandleKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_thinking)
+            await SendMessage();
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_input) || _thinking) return;
+
+        var userMsg = _input.Trim();
+        _input = "";
+        _messages.Add(new ChatMessage(userMsg, true));
+        _thinking = true;
+        StateHasChanged();
+
+        var response = await AdvisoryApi.ChatAsync(userMsg);
+        _thinking = false;
+        _messages.Add(new ChatMessage(response ?? "Sorry, I couldn't get a response. Is Ollama running?", false));
+        StateHasChanged();
+    }
+
+    private async Task AnalyzeSignal(TradeSignalDto signal)
+    {
+        _thinking = true;
+        _messages.Add(new ChatMessage($"Analyze my {signal.SignalType} signal on {signal.Asset}", true));
+        StateHasChanged();
+
+        var dto = new SignalAnalysisDto
+        {
+            Asset = signal.Asset,
+            SignalType = signal.SignalType.ToString(),
+            Regime = signal.Regime.ToString(),
+            SetupScore = signal.SetupScore,
+            EntryPrice = signal.EntryPrice,
+            StopLoss = signal.StopLoss,
+            Target1 = signal.Target1,
+            Target2 = signal.Target2,
+            RiskPercent = signal.RiskPercent
+        };
+
+        var response = await AdvisoryApi.AnalyzeSignalAsync(dto);
+        _thinking = false;
+        _messages.Add(new ChatMessage(response ?? "Sorry, I couldn't analyze this signal. Is Ollama running?", false));
+        StateHasChanged();
+    }
+
+    private record ChatMessage(string Text, bool IsUser)
+    {
+        public DateTime Time { get; } = DateTime.Now;
+    }
+}

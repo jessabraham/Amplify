@@ -1,0 +1,187 @@
+﻿@inject IJSRuntime JS
+
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <span class="card-title">
+            <i class="ph-duotone ph-chart-line" style="margin-right: 6px;"></i>
+            <span style="font-family: 'JetBrains Mono', monospace;">@Symbol</span> Price Chart
+        </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 0.6rem; color: var(--accent-cyan);">━ SMA 20</span>
+            <span style="font-size: 0.6rem; color: var(--accent-amber);">━ SMA 50</span>
+            <span style="font-size: 0.6rem; color: #a855f7;">━ SMA 200</span>
+            <span style="font-size: 0.6rem; color: rgba(59,130,246,0.5);">┄ BB</span>
+        </div>
+    </div>
+    <div id="@_mainChartId" style="width: 100%;"></div>
+    <div style="padding: 4px 16px 0; display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 0.7rem; font-weight: 600; color: var(--accent-cyan);">RSI (14)</span>
+        <span style="font-size: 0.6rem; color: var(--text-muted);">70 overbought · 30 oversold</span>
+    </div>
+    <div id="@_rsiChartId" style="width: 100%;"></div>
+</div>
+
+@code {
+    [Parameter] public string Symbol { get; set; } = "AAPL";
+    [Parameter] public decimal? EntryPrice { get; set; }
+    [Parameter] public decimal? StopLoss { get; set; }
+    [Parameter] public decimal? Target1 { get; set; }
+    [Parameter] public decimal? Target2 { get; set; }
+
+    private string _mainChartId = $"main-{Guid.NewGuid():N}";
+    private string _rsiChartId = $"rsi-{Guid.NewGuid():N}";
+    private bool _rendered;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+
+        var (candles, volumes, sma20, sma50, sma200, bbUpper, bbMiddle, bbLower, rsi) = GenerateAllData();
+
+        try
+        {
+            await JS.InvokeVoidAsync("createFullChart",
+                _mainChartId,
+                _rsiChartId,
+                candles,
+                volumes,
+                sma20,
+                sma50,
+                sma200,
+                bbUpper,
+                bbMiddle,
+                bbLower,
+                rsi,
+                EntryPrice.HasValue ? (double)EntryPrice.Value : 0,
+                StopLoss.HasValue ? (double)StopLoss.Value : 0,
+                Target1.HasValue ? (double)Target1.Value : 0,
+                Target2.HasValue ? (double)Target2.Value : 0
+            );
+        }
+        catch { }
+    }
+
+    private (object[], object[], object[], object[], object[], object[], object[], object[], object[]) GenerateAllData()
+    {
+        var random = new Random(Symbol.GetHashCode());
+        var basePrice = EntryPrice.HasValue ? (double)EntryPrice.Value : Symbol switch
+        {
+            "TSLA" => 410.0,
+            "AAPL" => 225.0,
+            "MSFT" => 420.0,
+            "GOOGL" => 175.0,
+            "AMZN" => 200.0,
+            _ => 150.0
+        };
+
+        // Generate 250 days of OHLCV data (for SMA 200)
+        var dates = new List<string>();
+        var opens = new List<double>();
+        var highs = new List<double>();
+        var lows = new List<double>();
+        var closes = new List<double>();
+        var volumeVals = new List<double>();
+
+        var price = basePrice * 0.85;
+
+        for (int i = 260; i >= 0; i--)
+        {
+            var date = DateTime.Today.AddDays(-i);
+            if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                continue;
+
+            var change = (random.NextDouble() - 0.47) * basePrice * 0.02;
+            var open = price;
+            var close = price + change;
+            var high = Math.Max(open, close) + random.NextDouble() * basePrice * 0.008;
+            var low = Math.Min(open, close) - random.NextDouble() * basePrice * 0.008;
+            var vol = 5000000 + random.Next(0, 15000000);
+
+            dates.Add(date.ToString("yyyy-MM-dd"));
+            opens.Add(Math.Round(open, 2));
+            highs.Add(Math.Round(high, 2));
+            lows.Add(Math.Round(low, 2));
+            closes.Add(Math.Round(close, 2));
+            volumeVals.Add(vol);
+
+            price = close;
+        }
+
+        var count = dates.Count;
+
+        // Candle data
+        var candles = new object[count];
+        for (int i = 0; i < count; i++)
+        {
+            candles[i] = new { time = dates[i], open = opens[i], high = highs[i], low = lows[i], close = closes[i] };
+        }
+
+        // Volume data
+        var volumes = new object[count];
+        for (int i = 0; i < count; i++)
+        {
+            var color = closes[i] >= opens[i] ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)";
+            volumes[i] = new { time = dates[i], value = volumeVals[i], color };
+        }
+
+        // SMA calculation
+        object[] CalcSMA(int period)
+        {
+            var result = new List<object>();
+            for (int i = period - 1; i < count; i++)
+            {
+                var sum = 0.0;
+                for (int j = i - period + 1; j <= i; j++) sum += closes[j];
+                result.Add(new { time = dates[i], value = Math.Round(sum / period, 2) });
+            }
+            return result.ToArray();
+        }
+
+        var sma20 = CalcSMA(20);
+        var sma50 = CalcSMA(50);
+        var sma200 = CalcSMA(200);
+
+        // Bollinger Bands (20-period, 2 std dev)
+        var bbUpperList = new List<object>();
+        var bbMiddleList = new List<object>();
+        var bbLowerList = new List<object>();
+
+        for (int i = 19; i < count; i++)
+        {
+            var slice = closes.Skip(i - 19).Take(20).ToList();
+            var mean = slice.Average();
+            var stdDev = Math.Sqrt(slice.Average(v => Math.Pow(v - mean, 2)));
+
+            bbUpperList.Add(new { time = dates[i], value = Math.Round(mean + 2 * stdDev, 2) });
+            bbMiddleList.Add(new { time = dates[i], value = Math.Round(mean, 2) });
+            bbLowerList.Add(new { time = dates[i], value = Math.Round(mean - 2 * stdDev, 2) });
+        }
+
+        // RSI (14-period)
+        var rsiList = new List<object>();
+        for (int i = 14; i < count; i++)
+        {
+            var gains = 0.0;
+            var losses = 0.0;
+
+            for (int j = i - 13; j <= i; j++)
+            {
+                var diff = closes[j] - closes[j - 1];
+                if (diff > 0) gains += diff;
+                else losses -= diff;
+            }
+
+            var avgGain = gains / 14.0;
+            var avgLoss = losses / 14.0;
+            var rs = avgLoss == 0 ? 100 : avgGain / avgLoss;
+            var rsi = 100 - (100 / (1 + rs));
+
+            rsiList.Add(new { time = dates[i], value = Math.Round(rsi, 1) });
+        }
+
+        return (candles, volumes, sma20, sma50, sma200,
+                bbUpperList.ToArray(), bbMiddleList.ToArray(), bbLowerList.ToArray(),
+                rsiList.ToArray());
+    }
+}
