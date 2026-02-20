@@ -139,6 +139,24 @@
                             <i class="ph-thin ph-clock" style="margin-right: 3px;"></i>@s.CreatedAt.ToString("MMM dd, HH:mm")
                         </span>
                     </div>
+
+                    <!-- Action Buttons -->
+                    <div style="display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+                        @{
+                            var riskUrl = $"/risk?symbol={s.Asset}&entry={s.EntryPrice}&stop={s.StopLoss}&target={s.Target1}&dir={s.SignalType}";
+                        }
+                        <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
+                                @onclick="() => Nav.NavigateTo(riskUrl)" @onclick:stopPropagation="true">
+                            <i class="ph-light ph-shield-check" style="margin-right: 3px;"></i>Risk Calc
+                        </button>
+                        @{
+                            var planUrl = $"/planner?symbol={s.Asset}";
+                        }
+                        <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
+                                @onclick="() => Nav.NavigateTo(planUrl)" @onclick:stopPropagation="true">
+                            <i class="ph-light ph-path" style="margin-right: 3px;"></i>Plan Trade
+                        </button>
+                    </div>
                 </div>
             }
         </div>

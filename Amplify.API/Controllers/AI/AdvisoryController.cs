@@ -52,9 +52,27 @@ public class AdvisoryController : ControllerBase
     [HttpPost("analyze-signal")]
     public async Task<IActionResult> AnalyzeSignal([FromBody] SignalAnalysisRequest request)
     {
-        var prompt = $"""
-            You are Amplify AI, a trading advisory assistant. Analyze this trade signal:
+        var riskSection = "";
+        if (request.ShareCount.HasValue)
+        {
+            riskSection = $"""
 
+            RISK ASSESSMENT (from Risk Engine):
+            Portfolio Size: ${request.PortfolioSize:N0}
+            Position Size: {request.ShareCount} shares (${request.PositionValue:N0})
+            Max Loss: ${request.MaxLoss:N0} ({request.RiskPercent}% of portfolio)
+            Risk/Reward Ratio: {request.RiskRewardRatio:F1}:1
+            Kelly Criterion: {request.KellyPercent:F1}%
+            Passes Risk Check: {(request.PassesRiskCheck == true ? "YES" : "NO")}
+            Warnings: {request.Warnings ?? "None"}
+            """;
+        }
+
+        var prompt = $"""
+            You are Amplify AI, a trading advisory assistant that combines pattern analysis 
+            with quantitative risk assessment. You give risk-aware recommendations.
+
+            TRADE SIGNAL:
             Asset: {request.Asset}
             Signal Type: {request.SignalType}
             Market Regime: {request.Regime}
@@ -64,15 +82,20 @@ public class AdvisoryController : ControllerBase
             Target 1: ${request.Target1}
             Target 2: ${request.Target2}
             Risk: {request.RiskPercent}%
+            {riskSection}
 
-            Provide:
-            1. Risk/Reward analysis (calculate R:R ratio for both targets)
-            2. Setup quality assessment based on the score and regime
-            3. Position sizing suggestion (assuming $100,000 portfolio)
-            4. Key risks and what to watch for
-            5. Overall recommendation: Strong conviction / Moderate / Weak — and why
+            Provide a concise analysis covering:
+            1. SETUP QUALITY — Is this pattern valid in the current regime? Score assessment.
+            2. RISK/REWARD — Calculate R:R. Is the reward worth the risk? Compare to Kelly sizing.
+            3. POSITION SIZING — Is the share count appropriate for the portfolio? Over/under-exposed?
+            4. KEY RISKS — What could invalidate this setup? What to watch.
+            5. RECOMMENDATION — Strong Buy / Buy / Hold / Avoid — with a 1-sentence reason.
 
-            Be concise and data-driven. Use bullet points.
+            If the risk check FAILS or R:R is below 1.5:1, be explicit about why this trade 
+            may not be worth taking. Suggest specific adjustments (tighter stop, wider target, 
+            or waiting for a better entry) with exact price levels.
+
+            Be concise and data-driven. Use the actual numbers provided.
             """;
 
         try
@@ -103,4 +126,14 @@ public class SignalAnalysisRequest
     public decimal Target1 { get; set; }
     public decimal Target2 { get; set; }
     public decimal RiskPercent { get; set; }
+
+    // Risk assessment fields (optional — included when available)
+    public int? ShareCount { get; set; }
+    public decimal? PositionValue { get; set; }
+    public decimal? MaxLoss { get; set; }
+    public decimal? RiskRewardRatio { get; set; }
+    public decimal? KellyPercent { get; set; }
+    public bool? PassesRiskCheck { get; set; }
+    public decimal? PortfolioSize { get; set; }
+    public string? Warnings { get; set; }
 }

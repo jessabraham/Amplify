@@ -26,6 +26,20 @@ public class TradeSignal : IEntity
 
     // AI advisory
     public string? AIAdvisoryJson { get; set; }
+    public string? AISummary { get; set; }
+    public string? AIBias { get; set; }
+    public decimal? AIConfidence { get; set; }
+    public string? AIRecommendedAction { get; set; }
+
+    // Risk assessment (saved from Risk Engine)
+    public int? RiskShareCount { get; set; }
+    public decimal? RiskPositionValue { get; set; }
+    public decimal? RiskMaxLoss { get; set; }
+    public decimal? RiskRewardRatio { get; set; }
+    public decimal? RiskKellyPercent { get; set; }
+    public bool? RiskPassesCheck { get; set; }
+    public decimal? RiskPortfolioSize { get; set; }
+    public string? RiskWarnings { get; set; }
 
     // Status
     public bool IsActive { get; set; } = true;

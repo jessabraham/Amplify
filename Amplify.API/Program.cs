@@ -92,6 +92,7 @@ using (var scope = app.Services.CreateScope())
     {
         await RoleSeeder.SeedRolesAsync(scope.ServiceProvider);
         await AdminSeeder.SeedAdminAsync(scope.ServiceProvider);
+        await SimulationSeeder.SeedDemoTradesAsync(scope.ServiceProvider);
         Console.WriteLine("Seeding complete!");
     }
     catch (Exception ex)

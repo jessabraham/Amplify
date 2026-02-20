@@ -102,8 +102,8 @@
             {
                 var biasColor = alert.OverallBias switch
                 {
-                                            "Strong Bullish" or "Bullish" => "var(--accent-green)",
-                                            "Strong Bearish" or "Bearish" => "var(--accent-red)",
+                                                        "Strong Bullish" or "Bullish" => "var(--accent-green)",
+                                                        "Strong Bearish" or "Bearish" => "var(--accent-red)",
                     _ => "var(--accent-amber)"
                 };
 
@@ -164,9 +164,9 @@
             {
                 var biasColor = item.LastBias switch
                 {
-                                            "Strong Bullish" or "Bullish" => "var(--accent-green)",
-                                            "Strong Bearish" or "Bearish" => "var(--accent-red)",
-                                            "Neutral" => "var(--accent-amber)",
+                                                        "Strong Bullish" or "Bullish" => "var(--accent-green)",
+                                                        "Strong Bearish" or "Bearish" => "var(--accent-red)",
+                                                        "Neutral" => "var(--accent-amber)",
                     _ => "var(--text-muted)"
                 };
 
@@ -223,6 +223,10 @@
                         <button class="watchlist-btn" title="View in Scanner"
                                 @onclick="() => OpenInScanner(item.Symbol)">
                             <i class="ph ph-crosshair" style="font-size: 0.85rem;"></i>
+                        </button>
+                        <button class="watchlist-btn" title="Plan Trade"
+                                @onclick="() => GoToPlanner(item.Symbol)">
+                            <i class="ph ph-path" style="font-size: 0.85rem; color: var(--accent-cyan);"></i>
                         </button>
                         <button class="watchlist-btn watchlist-btn-danger" title="Remove"
                                 @onclick="() => RemoveItem(item)">
@@ -396,6 +400,11 @@
     private void OpenInScanner(string symbol)
     {
         Nav.NavigateTo($"/scanner?symbol={symbol}");
+    }
+
+    private void GoToPlanner(string symbol)
+    {
+        Nav.NavigateTo($"/planner?symbol={symbol}");
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)

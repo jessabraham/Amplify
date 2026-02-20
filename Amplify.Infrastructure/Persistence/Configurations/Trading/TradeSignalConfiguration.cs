@@ -36,6 +36,20 @@ public class TradeSignalConfiguration : IEntityTypeConfiguration<TradeSignal>
         builder.Property(x => x.AIAdvisoryJson)
             .HasColumnType("nvarchar(max)");
 
+        // AI fields
+        builder.Property(x => x.AIConfidence).HasPrecision(5, 2);
+        builder.Property(x => x.AISummary).HasMaxLength(2000);
+        builder.Property(x => x.AIBias).HasMaxLength(50);
+        builder.Property(x => x.AIRecommendedAction).HasMaxLength(50);
+
+        // Risk fields
+        builder.Property(x => x.RiskPositionValue).HasPrecision(18, 2);
+        builder.Property(x => x.RiskMaxLoss).HasPrecision(18, 2);
+        builder.Property(x => x.RiskRewardRatio).HasPrecision(10, 4);
+        builder.Property(x => x.RiskKellyPercent).HasPrecision(10, 4);
+        builder.Property(x => x.RiskPortfolioSize).HasPrecision(18, 2);
+        builder.Property(x => x.RiskWarnings).HasMaxLength(2000);
+
         builder.HasOne(x => x.User)
             .WithMany()
             .HasForeignKey(x => x.UserId)

@@ -1,0 +1,497 @@
+﻿@page "/portfolio"
+@rendermode InteractiveServer
+@inject PortfolioApiClient PortfolioApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Domain.Enumerations
+@using Amplify.Web.Services
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-wallet" style="margin-right: 8px; color: var(--accent-cyan);"></i>Portfolio</h1>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="btn btn-secondary" style="font-size: 0.8rem;" @onclick="TakeSnapshot" disabled="@_snapshotting">
+                <i class="ph-light ph-camera" style="margin-right: 4px;"></i>@(_snapshotting ? "Saving..." : "Snapshot")
+            </button>
+            <button class="btn btn-primary" @onclick="() => _showNewPosition = true">
+                <i class="ph-bold ph-plus"></i> Open Position
+            </button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph ph-circle-notch" style="font-size: 2rem; color: var(--accent-blue); animation: spin 1s linear infinite;"></i>
+            <p style="color: var(--text-muted); margin-top: 12px;">Loading portfolio...</p>
+        </div>
+    }
+    else if (_summary is null)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-wallet" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Unable to load portfolio data.</p>
+        </div>
+    }
+    else
+    {
+        <!-- Summary Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-bank" style="margin-right: 4px;"></i>Total Value</div>
+                <div class="stat-value">@_summary.TotalValue.ToString("C2")</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>Invested</div>
+                <div class="stat-value">@_summary.InvestedAmount.ToString("C2")</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>Unrealized P&L</div>
+                <div class="stat-value @PnlClass(_summary.UnrealizedPnL)">@FormatPnl(_summary.UnrealizedPnL)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-check-circle" style="margin-right: 4px;"></i>Realized P&L</div>
+                <div class="stat-value @PnlClass(_summary.RealizedPnL)">@FormatPnl(_summary.RealizedPnL)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-pulse" style="margin-right: 4px;"></i>Daily P&L</div>
+                <div class="stat-value @PnlClass(_summary.DailyPnL)">@FormatPnl(_summary.DailyPnL)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-warning" style="margin-right: 4px;"></i>Risk Exposure</div>
+                <div class="stat-value" style="color: var(--accent-amber);">@_summary.RiskExposurePercent.ToString("F1")%</div>
+            </div>
+        </div>
+
+        <!-- Asset Allocation -->
+        @if (_summary.AssetAllocation.Any())
+        {
+            <div class="card" style="margin-bottom: 20px;">
+                <div style="margin-bottom: 12px;">
+                    <span style="font-weight: 600; color: var(--text-heading);"><i class="ph-duotone ph-chart-pie" style="margin-right: 6px;"></i>Asset Allocation</span>
+                </div>
+                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    @foreach (var a in _summary.AssetAllocation)
+                    {
+                        <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px 16px; min-width: 140px;">
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">@a.AssetClass</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-heading); margin-top: 2px;">@a.Percentage.ToString("F1")%</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">@a.MarketValue.ToString("C2") · @a.PositionCount pos</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Tab Switch: Open / Closed -->
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <button class="btn @(_activeTab == "open" ? "btn-primary" : "btn-secondary")" style="font-size: 0.85rem;"
+                    @onclick='() => _activeTab = "open"'>
+                <i class="ph-light ph-play" style="margin-right: 4px;"></i>Open (@_summary.OpenPositionCount)
+            </button>
+            <button class="btn @(_activeTab == "closed" ? "btn-primary" : "btn-secondary")" style="font-size: 0.85rem;"
+                    @onclick="LoadClosedTab">
+                <i class="ph-light ph-check" style="margin-right: 4px;"></i>Closed (@_summary.ClosedPositionCount)
+            </button>
+        </div>
+
+        @if (_activeTab == "open")
+        {
+            @if (_summary.OpenPositions.Count == 0)
+            {
+                <div class="card" style="text-align: center; padding: 36px;">
+                    <i class="ph-thin ph-chart-bar" style="font-size: 2.5rem; color: var(--text-muted);"></i>
+                    <p style="color: var(--text-muted); margin-top: 10px;">No open positions. Click "Open Position" to get started.</p>
+                </div>
+            }
+            else
+            {
+                <div class="signal-grid">
+                    @foreach (var p in _summary.OpenPositions)
+                    {
+                        var dirClass = p.SignalType.ToString().ToLower() == "short" ? "short" : "long";
+                        <div class="signal-card @dirClass">
+                            <div class="signal-card-header">
+                                <span class="signal-asset">@p.Symbol</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="signal-type-badge @dirClass">
+                                        @if (dirClass == "long")
+                                        {
+                                            <i class="ph-bold ph-trend-up" style="margin-right: 4px;"></i>
+                                        }
+                                        else
+                                        {
+
+                                            <i class="ph-bold ph-trend-down" style="margin-right: 4px;"></i>
+                                        }
+                                        @p.SignalType
+                                    </span>
+                                    <span style="font-size: 0.7rem; color: var(--text-muted);">@p.AssetClass</span>
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0;">
+                                <div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted);">Qty</div>
+                                    <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;">@p.Quantity.ToString("G")</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted);">Current</div>
+                                    <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;">@p.CurrentPrice.ToString("C2")</div>
+                                </div>
+                            </div>
+
+                            <div class="signal-levels">
+                                <div class="level-item">
+                                    <div class="level-label"><i class="ph-light ph-sign-in" style="margin-right: 3px;"></i>Entry</div>
+                                    <div class="level-value entry">@p.EntryPrice.ToString("C2")</div>
+                                </div>
+                                <div class="level-item">
+                                    <div class="level-label"><i class="ph-light ph-shield-warning" style="margin-right: 3px;"></i>Stop</div>
+                                    <div class="level-value stop">@p.StopLoss.ToString("C2")</div>
+                                </div>
+                                <div class="level-item">
+                                    <div class="level-label"><i class="ph-light ph-target" style="margin-right: 3px;"></i>Target</div>
+                                    <div class="level-value target">@p.Target1.ToString("C2")</div>
+                                </div>
+                                <div class="level-item">
+                                    <div class="level-label"><i class="ph-light ph-chart-line-up" style="margin-right: 3px;"></i>P&L</div>
+                                    <div class="level-value" style="color: @(p.UnrealizedPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                                        @FormatPnl(p.UnrealizedPnL)
+                                        @if (p.ReturnPercent.HasValue)
+                                        {
+                                            <span style="font-size: 0.65rem; opacity: 0.8;">(@p.ReturnPercent.Value.ToString("F2")%)</span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);">
+                                <span style="font-size: 0.7rem; color: var(--text-muted);">
+                                    <i class="ph-thin ph-clock" style="margin-right: 3px;"></i>@p.EntryDateUtc.ToString("MMM dd, HH:mm")
+                                </span>
+                                <div style="display: flex; gap: 6px;">
+                                    @{
+                                        var planUrl = $"/planner?symbol={p.Symbol}";
+                                    }
+                                    <a href="@planUrl" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px;">
+                                        <i class="ph-light ph-path" style="margin-right: 3px;"></i>Plan
+                                    </a>
+                                    <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px;"
+                                            @onclick="() => StartClose(p)">
+                                        <i class="ph-light ph-x-circle" style="margin-right: 3px;"></i>Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            @if (_closedPositions.Count == 0)
+            {
+                <div class="card" style="text-align: center; padding: 36px;">
+                    <p style="color: var(--text-muted);">No closed positions yet.</p>
+                </div>
+            }
+            else
+            {
+                <div class="signal-grid">
+                    @foreach (var p in _closedPositions)
+                    {
+                        var dirClass = p.SignalType.ToString().ToLower() == "short" ? "short" : "long";
+                        <div class="signal-card @dirClass" style="opacity: 0.85;">
+                            <div class="signal-card-header">
+                                <span class="signal-asset">@p.Symbol</span>
+                                <span class="signal-type-badge @dirClass" style="font-size: 0.6rem;">@p.SignalType</span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0; font-size: 0.8rem;">
+                                <div>
+                                    <div style="font-size: 0.65rem; color: var(--text-muted);">Entry</div>
+                                    <div style="font-weight: 600;">@p.EntryPrice.ToString("C2")</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.65rem; color: var(--text-muted);">Exit</div>
+                                    <div style="font-weight: 600;">@(p.ExitPrice?.ToString("C2") ?? "—")</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.65rem; color: var(--text-muted);">P&L</div>
+                                    <div style="font-weight: 700; color: @(p.RealizedPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                                        @FormatPnl(p.RealizedPnL)
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">
+                                @p.EntryDateUtc.ToString("MMM dd") → @(p.ExitDateUtc?.ToString("MMM dd") ?? "—")
+                                @if (p.ReturnPercent.HasValue)
+                                {
+                                    <span style="margin-left: 8px; color: @(p.ReturnPercent.Value >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                                        @(p.ReturnPercent.Value >= 0 ? "+" : "")@p.ReturnPercent.Value.ToString("F2")%
+                                    </span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    }
+
+    <!-- New Position Modal -->
+    @if (_showNewPosition)
+    {
+        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: center; justify-content: center;"
+             @onclick="() => _showNewPosition = false">
+            <div class="card" style="width: 420px; max-height: 90vh; overflow-y: auto;" @onclick:stopPropagation="true">
+                <h3 style="margin-bottom: 16px;"><i class="ph-duotone ph-plus-circle" style="margin-right: 6px; color: var(--accent-cyan);"></i>Open Position</h3>
+
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Symbol</label>
+                        <input type="text" class="form-input" placeholder="e.g. AAPL" @bind="_newPosition.Symbol" />
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Asset Class</label>
+                            <select class="form-input" @bind="_newPosition.AssetClass">
+                                @foreach (var ac in Enum.GetValues<AssetClass>())
+                                {
+                                    <option value="@ac">@ac</option>
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Direction</label>
+                            <select class="form-input" @bind="_newPosition.SignalType">
+                                @foreach (var st in Enum.GetValues<SignalType>())
+                                {
+                                    <option value="@st">@st</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Entry Price</label>
+                            <input type="number" class="form-input" step="0.01" @bind="_newPosition.EntryPrice" />
+                        </div>
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Quantity</label>
+                            <input type="number" class="form-input" step="0.01" @bind="_newPosition.Quantity" />
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Stop Loss</label>
+                            <input type="number" class="form-input" step="0.01" @bind="_newPosition.StopLoss" />
+                        </div>
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Target 1</label>
+                            <input type="number" class="form-input" step="0.01" @bind="_newPosition.Target1" />
+                        </div>
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">Target 2</label>
+                            <input type="number" class="form-input" step="0.01" @bind="_newPosition.Target2" />
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Notes (optional)</label>
+                        <input type="text" class="form-input" @bind="_newPosition.Notes" />
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div style="color: var(--accent-red); font-size: 0.8rem; margin-top: 8px;">@_error</div>
+                }
+
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+                    <button class="btn btn-secondary" @onclick="() => _showNewPosition = false">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SubmitNewPosition" disabled="@_submitting">
+                        @(_submitting ? "Opening..." : "Open Position")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Close Position Modal -->
+    @if (_showCloseModal && _closingPosition is not null)
+    {
+        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: center; justify-content: center;"
+             @onclick="() => _showCloseModal = false">
+            <div class="card" style="width: 360px;" @onclick:stopPropagation="true">
+                <h3 style="margin-bottom: 16px;"><i class="ph-duotone ph-x-circle" style="margin-right: 6px; color: var(--accent-amber);"></i>Close @_closingPosition.Symbol</h3>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Exit Price</label>
+                        <input type="number" class="form-input" step="0.01" @bind="_exitPrice" />
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Notes (optional)</label>
+                        <input type="text" class="form-input" @bind="_closeNotes" />
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div style="color: var(--accent-red); font-size: 0.8rem; margin-top: 8px;">@_error</div>
+                }
+
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+                    <button class="btn btn-secondary" @onclick="() => _showCloseModal = false">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SubmitClose" disabled="@_submitting">
+                        @(_submitting ? "Closing..." : "Close Position")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private PortfolioSummaryDto? _summary;
+    private List<PositionDto> _closedPositions = [];
+    private bool _loading = true;
+    private bool _loaded;
+    private string _activeTab = "open";
+
+    // New position form
+    private bool _showNewPosition;
+    private PositionDto _newPosition = new();
+    private bool _submitting;
+    private string? _error;
+
+    // Close position
+    private bool _showCloseModal;
+    private PositionDto? _closingPosition;
+    private decimal _exitPrice;
+    private string? _closeNotes;
+
+    // Snapshot
+    private bool _snapshotting;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await LoadSummary();
+        StateHasChanged();
+    }
+
+    private async Task LoadSummary()
+    {
+        _loading = true;
+        try { _summary = await PortfolioApi.GetSummaryAsync(); }
+        catch { _summary = null; }
+        finally { _loading = false; }
+    }
+
+    private async Task LoadClosedTab()
+    {
+        _activeTab = "closed";
+        if (!_closedPositions.Any())
+        {
+            try { _closedPositions = await PortfolioApi.GetClosedPositionsAsync(); }
+            catch { /* swallow */ }
+        }
+    }
+
+    private async Task SubmitNewPosition()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_newPosition.Symbol))
+        { _error = "Symbol is required."; return; }
+        if (_newPosition.EntryPrice <= 0)
+        { _error = "Entry price must be positive."; return; }
+        if (_newPosition.Quantity <= 0)
+        { _error = "Quantity must be positive."; return; }
+
+        _submitting = true;
+        try
+        {
+            var result = await PortfolioApi.OpenPositionAsync(_newPosition);
+            if (result is not null)
+            {
+                _showNewPosition = false;
+                _newPosition = new PositionDto();
+                await LoadSummary();
+            }
+            else
+            {
+                _error = "Failed to open position.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _submitting = false; }
+    }
+
+    private void StartClose(PositionDto position)
+    {
+        _closingPosition = position;
+        _exitPrice = position.CurrentPrice;
+        _closeNotes = null;
+        _error = null;
+        _showCloseModal = true;
+    }
+
+    private async Task SubmitClose()
+    {
+        _error = null;
+        if (_exitPrice <= 0)
+        { _error = "Exit price must be positive."; return; }
+
+        _submitting = true;
+        try
+        {
+            var dto = new ClosePositionDto
+            {
+                PositionId = _closingPosition!.Id,
+                ExitPrice = _exitPrice,
+                Notes = _closeNotes
+            };
+            var result = await PortfolioApi.ClosePositionAsync(dto);
+            if (result is not null)
+            {
+                _showCloseModal = false;
+                _closingPosition = null;
+                _closedPositions.Clear(); // force re-fetch
+                await LoadSummary();
+            }
+            else
+            {
+                _error = "Failed to close position.";
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _submitting = false; }
+    }
+
+    private async Task TakeSnapshot()
+    {
+        _snapshotting = true;
+        try { await PortfolioApi.TakeSnapshotAsync(); }
+        catch { /* swallow */ }
+        finally { _snapshotting = false; }
+    }
+
+    private static string FormatPnl(decimal pnl) =>
+        $"{(pnl >= 0 ? "+" : "")}{pnl:C2}";
+
+    private static string PnlClass(decimal pnl) =>
+        pnl >= 0 ? "positive" : "negative";
+}

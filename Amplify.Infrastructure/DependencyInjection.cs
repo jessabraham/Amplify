@@ -27,6 +27,11 @@ public static class DependencyInjection
 
         // Services
         services.AddScoped<ITradeSignalService, TradeSignalService>();
+        services.AddScoped<IPortfolioService, PortfolioService>();
+        services.AddScoped<IFeatureEngine, FeatureEngine>();
+        services.AddScoped<IRegimeEngine, RegimeEngine>();
+        services.AddScoped<IRegimeService, RegimeService>();
+        services.AddScoped<IRiskEngine, RiskEngine>();
 
         services.AddScoped<IAIAdvisor, OllamaAIAdvisor>();// AI Advi
 
@@ -35,6 +40,10 @@ public static class DependencyInjection
         services.AddHostedService<Amplify.Infrastructure.Services.BackgroundPatternScannerService>();
 
         services.AddHttpClient<IPatternAnalyzer, OllamaPatternAnalyzer>();
+
+        // Simulation engine
+        services.AddScoped<TradeSimulationService>();
+        services.AddHostedService<SimulationResolverService>();
 
         return services;
     }

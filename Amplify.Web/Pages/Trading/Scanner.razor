@@ -47,12 +47,12 @@
                 @if (_scanning)
                 {
                     <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
-                    <span>@(_enableAI == "true" ? "AI Analyzing..." : "Scanning...")</span>
+                    <span>Scanning 4H + Daily + Weekly...</span>
                 }
                 else
                 {
                     <i class="ph-bold ph-magnifying-glass"></i>
-                    <span>Scan</span>
+                    <span>Multi-Timeframe Scan</span>
                 }
             </button>
         </div>
@@ -60,7 +60,7 @@
         <!-- Quick scan buttons -->
         <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
             <span style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">Quick:</span>
-            @foreach (var ticker in new[] { "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "AMZN", "META" })
+            @foreach (var ticker in new[] { "AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "COIN" })
             {
                 var t = ticker;
                 <button class="btn-chip @(_symbol.ToUpper() == t ? "active" : "")" @onclick="() => QuickScan(t)">@t</button>
@@ -77,6 +77,7 @@
 
     @if (_result is not null)
     {
+        <!-- Symbol + Price Header -->
         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
             <span style="font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-heading);">
                 @_result.Symbol
@@ -85,11 +86,163 @@
                 @_result.CurrentPrice.ToString("C")
             </span>
             <span style="font-size: 0.8rem; color: var(--text-muted);">
-                @_result.TotalPatterns patterns detected
+                @_result.TotalPatterns patterns across 3 timeframes
             </span>
         </div>
 
-        <!-- AI Analysis Panel -->
+        <!-- ═══ MULTI-TIMEFRAME REGIME ═══ -->
+        <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                <i class="ph-duotone ph-stack" style="font-size: 1.1rem; color: var(--accent-cyan);"></i>
+                <span style="font-weight: 700; color: var(--text-heading);">Multi-Timeframe Regime</span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;">
+                @{
+                    var regCss = _result.CombinedRegime.ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
+                    var alignColor = _result.RegimeAlignment == "Aligned" ? "var(--accent-green)" : _result.RegimeAlignment == "Conflicting" ? "var(--accent-red)" : "var(--accent-amber)";
+                    var dirAlignColor = _result.DirectionAlignment.Contains("All Bullish") ? "var(--accent-green)" : _result.DirectionAlignment.Contains("All Bearish") ? "var(--accent-red)" : _result.DirectionAlignment == "Conflicting" ? "var(--accent-red)" : "var(--accent-amber)";
+                }
+                <span class="regime-badge @regCss" style="font-size: 0.9rem; padding: 6px 16px;">@_result.CombinedRegime</span>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">
+                    Confidence: <span style="font-weight: 700; color: var(--accent-cyan);">@(_result.CombinedRegimeConfidence.ToString("F0"))%</span>
+                </span>
+                <span style="font-size: 0.75rem; padding: 3px 10px; border-radius: 4px; background: rgba(255,255,255,0.05); color: @alignColor; font-weight: 600;">
+                    Regime: @_result.RegimeAlignment
+                </span>
+                <span style="font-size: 0.75rem; padding: 3px 10px; border-radius: 4px; background: rgba(255,255,255,0.05); color: @dirAlignColor; font-weight: 600;">
+                    Direction: @_result.DirectionAlignment
+                    @if (_result.AlignmentScore > 0)
+                    {
+                        <span style="opacity: 0.6; margin-left: 4px;">(@(_result.AlignmentScore.ToString("F0"))%)</span>
+                    }
+                </span>
+            </div>
+
+            <!-- Per-Timeframe Grid -->
+            @if (_result.TimeframeSummaries?.Any() == true)
+            {
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                    @foreach (var tf in _result.TimeframeSummaries)
+                    {
+                        var tfDirColor = tf.DominantDirection == "Bullish" ? "var(--accent-green)" : tf.DominantDirection == "Bearish" ? "var(--accent-red)" : "var(--text-muted)";
+                        var tfRegCss = tf.Regime.ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
+                        var tfWeight = tf.Timeframe == "Weekly" ? "3x weight" : tf.Timeframe == "Daily" ? "2x weight" : "1x weight";
+                        <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px 14px; border: 1px solid var(--border);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span style="font-weight: 700; color: var(--text-heading); font-size: 0.9rem;">@tf.Timeframe</span>
+                                <span style="font-size: 0.6rem; color: var(--text-muted); opacity: 0.6;">@tfWeight</span>
+                            </div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.75rem; margin-bottom: 6px;">
+                                <span class="regime-badge @tfRegCss" style="font-size: 0.65rem; padding: 2px 8px;">@tf.Regime</span>
+                                <span style="color: @tfDirColor; font-weight: 600;">@tf.DominantDirection</span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                @tf.BullishCount bullish · @tf.BearishCount bearish · @tf.PatternCount total
+                            </div>
+                            @if (tf.RSI.HasValue)
+                            {
+                                var rsiColor = tf.RSI < 30 ? "var(--accent-green)" : tf.RSI > 70 ? "var(--accent-red)" : "var(--text-muted)";
+                                <div style="font-size: 0.7rem; color: @rsiColor; margin-top: 4px;">RSI: @tf.RSI?.ToString("F0") · Volume: @tf.VolumeProfile</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- ═══ CONTEXT LAYERS ═══ -->
+        @if (_result.Context is not null)
+        {
+            var ctx = _result.Context;
+            <div class="card" style="margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <i class="ph-duotone ph-chart-line-up" style="font-size: 1.1rem; color: var(--accent-cyan);"></i>
+                    <span style="font-weight: 700; color: var(--text-heading);">Market Context</span>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 12px;">
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Volume</div>
+                        @{
+                            var volColor = ctx.VolumeProfile == "Breakout" ? "var(--accent-green)" : ctx.VolumeProfile == "Low" ? "var(--accent-red)" : "var(--text-heading)";
+                        }
+                        <div class="pattern-level-value" style="color: @volColor;">@ctx.VolumeProfile (@(ctx.VolumeRatio)x)</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">MA Stack</div>
+                        @{
+                            var maColor = ctx.MAAlignment.Contains("Bullish") ? "var(--accent-green)" : ctx.MAAlignment.Contains("Bearish") ? "var(--accent-red)" : "var(--text-heading)";
+                        }
+                        <div class="pattern-level-value" style="color: @maColor;">@ctx.MAAlignment</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">RSI (14)</div>
+                        @{
+                            var rsiZoneColor = ctx.RSIZone == "Oversold" ? "var(--accent-green)" : ctx.RSIZone == "Overbought" ? "var(--accent-red)" : "var(--text-heading)";
+                        }
+                        <div class="pattern-level-value" style="color: @rsiZoneColor;">@ctx.RSI?.ToString("F0") (@ctx.RSIZone)</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Volatility</div>
+                        <div class="pattern-level-value">@ctx.ATRPercent?.ToString("F2")%</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Streak</div>
+                        @if (ctx.ConsecutiveUpDays > 0)
+                        {
+                            <div class="pattern-level-value" style="color: var(--accent-green);">@ctx.ConsecutiveUpDays days up</div>
+                        }
+                        else if (ctx.ConsecutiveDownDays > 0)
+                        {
+                            <div class="pattern-level-value" style="color: var(--accent-red);">@ctx.ConsecutiveDownDays days down</div>
+                        }
+                        else
+                        {
+                            <div class="pattern-level-value">—</div>
+                        }
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 20px; font-size: 0.78rem; flex-wrap: wrap;">
+                    @if (ctx.NearestSupport.HasValue)
+                    {
+                        <span style="color: var(--accent-green);">
+                            <i class="ph-bold ph-arrow-down" style="margin-right: 3px;"></i>Support: @ctx.NearestSupport?.ToString("C2")
+                            <span style="opacity: 0.6;">(@ctx.DistToSupportPct?.ToString("F1")% below)</span>
+                        </span>
+                    }
+                    @if (ctx.NearestResistance.HasValue)
+                    {
+                        <span style="color: var(--accent-red);">
+                            <i class="ph-bold ph-arrow-up" style="margin-right: 3px;"></i>Resistance: @ctx.NearestResistance?.ToString("C2")
+                            <span style="opacity: 0.6;">(@ctx.DistToResistancePct?.ToString("F1")% above)</span>
+                        </span>
+                    }
+                    @if (ctx.DistFromSMA200Pct.HasValue)
+                    {
+                        var sma200Color = Math.Abs(ctx.DistFromSMA200Pct.Value) > 15 ? "var(--accent-red)" : "var(--text-muted)";
+                        <span style="color: @sma200Color; margin-left: auto;">@(ctx.DistFromSMA200Pct.Value.ToString("+0.0;-0.0"))% from SMA200</span>
+                    }
+                </div>
+
+                @if (ctx.KeyLevels?.Any() == true)
+                {
+                    <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+                        <span style="font-size: 0.65rem; color: var(--text-muted); align-self: center;">Key Levels:</span>
+                        @foreach (var kl in ctx.KeyLevels)
+                        {
+                            var klColor = kl.Type == "Support" ? "var(--accent-green)" : kl.Type == "Resistance" ? "var(--accent-red)" : "var(--text-muted)";
+                            <span style="font-size: 0.65rem; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.05); color: @klColor;">
+                                @kl.Type @kl.Price.ToString("C2") @(kl.TouchCount > 0 ? $"({kl.TouchCount}x)" : "")
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- ═══ AI ANALYSIS ═══ -->
         @if (_result.AIAnalysis is not null)
         {
             var ai = _result.AIAnalysis;
@@ -115,11 +268,10 @@
             <div class="card ai-panel" style="margin-bottom: 20px; border-left: 3px solid @biasColor;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                     <i class="ph-duotone ph-robot" style="font-size: 1.2rem; color: var(--accent-cyan);"></i>
-                    <span style="font-size: 1rem; font-weight: 700; color: var(--text-heading);">AI Analysis</span>
+                    <span style="font-size: 1rem; font-weight: 700; color: var(--text-heading);">AI Multi-Timeframe Analysis</span>
                     <span style="font-size: 0.6rem; background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); padding: 2px 8px; border-radius: 10px;">Ollama</span>
                 </div>
 
-                <!-- Bias + Action + Confidence Row -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
                     <div class="pattern-level">
                         <div class="pattern-level-label">Overall Bias</div>
@@ -141,7 +293,6 @@
                     </div>
                 </div>
 
-                <!-- AI Recommended Levels -->
                 @if (ai.RecommendedEntry.HasValue)
                 {
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
@@ -160,13 +311,11 @@
                     </div>
                 }
 
-                <!-- Summary -->
                 <div style="margin-bottom: 12px;">
                     <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 6px;">Summary</div>
                     <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin: 0;">@ai.Summary</p>
                 </div>
 
-                <!-- Detailed Analysis (collapsible) -->
                 @if (!string.IsNullOrEmpty(ai.DetailedAnalysis))
                 {
                     <div style="margin-bottom: 12px;">
@@ -181,8 +330,7 @@
                     </div>
                 }
 
-                <!-- Pattern Verdicts Table -->
-                @if (_result.AIAnalysis?.OverallBias is not null && _result.Patterns.Any(p => !string.IsNullOrEmpty(p.AIGrade)))
+                @if (_result.Patterns.Any(p => !string.IsNullOrEmpty(p.AIGrade)))
                 {
                     <div>
                         <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">Pattern Verdicts</div>
@@ -195,8 +343,10 @@
                                                     "C" => "var(--accent-amber)",
                                 _ => "var(--accent-red)"
                             };
+                            var tfBadge = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "4H" ? "rgba(255,255,255,0.05)" : "rgba(0,200,200,0.15)";
 
                             <div style="display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border);">
+                                <span style="font-size: 0.55rem; padding: 1px 5px; border-radius: 3px; background: @tfBadge; min-width: 36px; text-align: center;">@p.Timeframe</span>
                                 <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 700; color: @gradeColor; min-width: 28px;">@p.AIGrade</span>
                                 <span style="font-size: 0.7rem; min-width: 16px;">@(p.AIValid ? "✓" : "✗")</span>
                                 <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-heading); min-width: 160px;">@p.PatternName</span>
@@ -208,7 +358,20 @@
             </div>
         }
 
-        <!-- Stats Summary -->
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+            @{
+                var plannerUrl = $"/planner?symbol={_result.Symbol}";
+            }
+            <a href="@plannerUrl" class="btn btn-primary" style="font-size: 0.85rem;">
+                <i class="ph-bold ph-path" style="margin-right: 4px;"></i>Plan Trade for @_result.Symbol
+            </a>
+            <a href="/risk" class="btn btn-secondary" style="font-size: 0.85rem;">
+                <i class="ph-light ph-shield-check" style="margin-right: 4px;"></i>Risk Calculator
+            </a>
+        </div>
+
+        <!-- ═══ PATTERN CARDS ═══ -->
         @if (_result.Patterns.Count > 0)
         {
             <div class="stats-row" style="margin-bottom: 20px;">
@@ -230,7 +393,6 @@
                 </div>
             </div>
 
-            <!-- Pattern Cards -->
             <div class="pattern-grid">
                 @foreach (var p in _result.Patterns)
                 {
@@ -260,6 +422,7 @@
                                         "C" => "var(--accent-amber)",
                         _ => "var(--accent-red)"
                     };
+                    var tfBadgeBg = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "4H" ? "rgba(255,255,255,0.08)" : "rgba(0,200,200,0.15)";
 
                     <div class="card pattern-card" style="border-left: 3px solid @dirColor; @(!p.AIValid ? "opacity: 0.5;" : "")">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
@@ -268,6 +431,7 @@
                                     <i class="ph-bold @dirIcon" style="color: @dirColor; margin-right: 4px;"></i>@p.PatternName
                                 </div>
                                 <div style="display: flex; gap: 6px; align-items: center;">
+                                    <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 3px; background: @tfBadgeBg; font-weight: 600;">@p.Timeframe</span>
                                     <span class="override-badge @dirBadgeClass" style="font-size: 0.6rem;">@p.Direction</span>
                                     @if (!string.IsNullOrEmpty(p.AIGrade))
                                     {
@@ -337,7 +501,7 @@
         <div class="card" style="text-align: center; padding: 48px;">
             <i class="ph-thin ph-crosshair" style="font-size: 3rem; color: var(--text-muted);"></i>
             <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Enter a symbol and scan for patterns.</p>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">The engine detects 27+ patterns, then AI validates and synthesizes a trade recommendation.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Scans 4H, Daily, and Weekly timeframes simultaneously. AI synthesizes patterns with weighted regime detection and context layers.</p>
         </div>
     }
 </div>

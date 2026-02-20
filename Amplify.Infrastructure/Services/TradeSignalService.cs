@@ -35,6 +35,18 @@ public class TradeSignalService : ITradeSignalService
                 Target2 = s.Target2,
                 RiskPercent = s.RiskPercent,
                 AIAdvisoryJson = s.AIAdvisoryJson,
+                AISummary = s.AISummary,
+                AIBias = s.AIBias,
+                AIConfidence = s.AIConfidence,
+                AIRecommendedAction = s.AIRecommendedAction,
+                RiskShareCount = s.RiskShareCount,
+                RiskPositionValue = s.RiskPositionValue,
+                RiskMaxLoss = s.RiskMaxLoss,
+                RiskRewardRatio = s.RiskRewardRatio,
+                RiskKellyPercent = s.RiskKellyPercent,
+                RiskPassesCheck = s.RiskPassesCheck,
+                RiskPortfolioSize = s.RiskPortfolioSize,
+                RiskWarnings = s.RiskWarnings,
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt
             })
@@ -64,6 +76,18 @@ public class TradeSignalService : ITradeSignalService
             Target2 = s.Target2,
             RiskPercent = s.RiskPercent,
             AIAdvisoryJson = s.AIAdvisoryJson,
+            AISummary = s.AISummary,
+            AIBias = s.AIBias,
+            AIConfidence = s.AIConfidence,
+            AIRecommendedAction = s.AIRecommendedAction,
+            RiskShareCount = s.RiskShareCount,
+            RiskPositionValue = s.RiskPositionValue,
+            RiskMaxLoss = s.RiskMaxLoss,
+            RiskRewardRatio = s.RiskRewardRatio,
+            RiskKellyPercent = s.RiskKellyPercent,
+            RiskPassesCheck = s.RiskPassesCheck,
+            RiskPortfolioSize = s.RiskPortfolioSize,
+            RiskWarnings = s.RiskWarnings,
             IsActive = s.IsActive,
             CreatedAt = s.CreatedAt
         });
@@ -84,6 +108,20 @@ public class TradeSignalService : ITradeSignalService
             Target2 = dto.Target2,
             RiskPercent = dto.RiskPercent,
             AIAdvisoryJson = dto.AIAdvisoryJson,
+            // AI fields
+            AISummary = dto.AISummary,
+            AIBias = dto.AIBias,
+            AIConfidence = dto.AIConfidence,
+            AIRecommendedAction = dto.AIRecommendedAction,
+            // Risk fields
+            RiskShareCount = dto.RiskShareCount,
+            RiskPositionValue = dto.RiskPositionValue,
+            RiskMaxLoss = dto.RiskMaxLoss,
+            RiskRewardRatio = dto.RiskRewardRatio,
+            RiskKellyPercent = dto.RiskKellyPercent,
+            RiskPassesCheck = dto.RiskPassesCheck,
+            RiskPortfolioSize = dto.RiskPortfolioSize,
+            RiskWarnings = dto.RiskWarnings,
             UserId = userId
         };
 

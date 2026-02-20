@@ -447,6 +447,117 @@ namespace Amplify.Infrastructure.Migrations
                     b.ToTable("DetectedPatterns", (string)null);
                 });
 
+            modelBuilder.Entity("Amplify.Domain.Entities.Trading.PatternPerformance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AvgDaysHeld")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("decimal(8,2)");
+
+                    b.Property<decimal>("AvgLossPercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal>("AvgRMultiple")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal>("AvgWinPercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal>("BestTradePercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Expired")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastTradeDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Losses")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PatternType")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ProfitFactor")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<int>("Regime")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Timeframe")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<decimal>("TotalPnLPercent")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("decimal(12,4)");
+
+                    b.Property<int>("TotalTrades")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TradesWhenAligned")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TradesWhenConflicting")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TradesWithBreakoutVol")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<decimal>("WinRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("WinRateWhenAligned")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("WinRateWhenConflicting")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("WinRateWithBreakoutVol")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("Wins")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("WorstTradePercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "PatternType", "Direction", "Timeframe", "Regime")
+                        .IsUnique();
+
+                    b.ToTable("PatternPerformances", (string)null);
+                });
+
             modelBuilder.Entity("Amplify.Domain.Entities.Trading.PortfolioSnapshot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -497,6 +608,254 @@ namespace Amplify.Infrastructure.Migrations
                     b.ToTable("PortfolioSnapshots", (string)null);
                 });
 
+            modelBuilder.Entity("Amplify.Domain.Entities.Trading.Position", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AssetClass")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("CurrentPrice")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("DeactivatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("EntryDateUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("EntryPrice")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("ExitDateUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("ExitPrice")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("RealizedPnL")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("ReturnPercent")
+                        .HasColumnType("decimal(8,4)");
+
+                    b.Property<int>("SignalType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("StopLoss")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("Target1")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("Target2")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("TradeSignalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("UnrealizedPnL")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Symbol");
+
+                    b.HasIndex("TradeSignalId");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("Positions", (string)null);
+                });
+
+            modelBuilder.Entity("Amplify.Domain.Entities.Trading.SimulatedTrade", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("AIConfidence")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("AIRecommendedAction")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Asset")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DaysHeld")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("DetectedPatternId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("EntryPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("ExitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("HighestPriceSeen")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("LowestPriceSeen")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("MAAlignment")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal?>("MaxDrawdownPercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<int>("MaxExpirationDays")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("MaxRisk")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("PatternConfidence")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int?>("PatternDirection")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PatternTimeframe")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<int?>("PatternType")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("PnLDollars")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("PnLPercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal?>("PositionValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("RMultiple")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal?>("RSIAtEntry")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("RegimeAlignment")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("RegimeAtEntry")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ShareCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("StopLoss")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("Target1")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("Target2")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("TimeframeAlignment")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("TradeSignalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("VolumeProfile")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TradeSignalId");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("SimulatedTrades", (string)null);
+                });
+
             modelBuilder.Entity("Amplify.Domain.Entities.Trading.TradeSignal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -505,6 +864,22 @@ namespace Amplify.Infrastructure.Migrations
 
                     b.Property<string>("AIAdvisoryJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("AIBias")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal?>("AIConfidence")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("AIRecommendedAction")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("AISummary")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<DateTime?>("ArchivedAt")
                         .HasColumnType("datetime2");
@@ -529,8 +904,38 @@ namespace Amplify.Infrastructure.Migrations
                     b.Property<int>("Regime")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("RiskKellyPercent")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<decimal?>("RiskMaxLoss")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool?>("RiskPassesCheck")
+                        .HasColumnType("bit");
+
                     b.Property<decimal>("RiskPercent")
                         .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal?>("RiskPortfolioSize")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("RiskPositionValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("RiskRewardRatio")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<int?>("RiskShareCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RiskWarnings")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<decimal>("SetupScore")
                         .HasColumnType("decimal(5,2)");
@@ -829,6 +1234,42 @@ namespace Amplify.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Amplify.Domain.Entities.Trading.Position", b =>
+                {
+                    b.HasOne("Amplify.Domain.Entities.Trading.TradeSignal", "TradeSignal")
+                        .WithMany()
+                        .HasForeignKey("TradeSignalId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Amplify.Domain.Entities.Identity.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("TradeSignal");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Amplify.Domain.Entities.Trading.SimulatedTrade", b =>
+                {
+                    b.HasOne("Amplify.Domain.Entities.Trading.TradeSignal", "TradeSignal")
+                        .WithMany()
+                        .HasForeignKey("TradeSignalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Amplify.Domain.Entities.Identity.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("TradeSignal");
 
                     b.Navigation("User");
                 });

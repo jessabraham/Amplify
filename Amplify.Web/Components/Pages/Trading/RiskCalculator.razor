@@ -1,0 +1,320 @@
+﻿@page "/risk"
+@rendermode InteractiveServer
+@inject RiskApiClient RiskApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Web.Services
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-shield-check" style="margin-right: 8px; color: var(--accent-cyan);"></i>Risk Calculator</h1>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 380px 1fr; gap: 20px;">
+        <!-- Input Panel -->
+        <div class="card" style="align-self: start;">
+            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 16px;">
+                <i class="ph-duotone ph-calculator" style="margin-right: 6px;"></i>Trade Parameters
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted);">Symbol</label>
+                    <input type="text" class="form-input" placeholder="e.g. AAPL" @bind="_input.Symbol"
+                           style="text-transform: uppercase;" />
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Direction</label>
+                        <select class="form-input" @bind="_input.IsShort">
+                            <option value="false">Long</option>
+                            <option value="true">Short</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Portfolio Size ($)</label>
+                        <input type="number" class="form-input" step="1000" @bind="_input.PortfolioSize" />
+                    </div>
+                </div>
+
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted);">Entry Price</label>
+                    <input type="number" class="form-input" step="0.01" @bind="_input.EntryPrice" />
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Stop Loss</label>
+                        <input type="number" class="form-input" step="0.01" @bind="_input.StopLoss" />
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Risk %</label>
+                        <input type="number" class="form-input" step="0.5" @bind="_input.RiskPercent" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Target 1</label>
+                        <input type="number" class="form-input" step="0.01" @bind="_input.Target1" />
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Target 2 (optional)</label>
+                        <input type="number" class="form-input" step="0.01" @bind="_input.Target2" />
+                    </div>
+                </div>
+
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted);">Win Rate % (optional, for Kelly)</label>
+                    <input type="number" class="form-input" step="1" @bind="_input.WinRate" placeholder="e.g. 55" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div style="color: var(--accent-red); font-size: 0.8rem;">@_error</div>
+                }
+
+                <button class="btn btn-primary" @onclick="Calculate" disabled="@_calculating" style="margin-top: 4px;">
+                    <i class="ph-bold ph-calculator" style="margin-right: 4px;"></i>@(_calculating ? "Calculating..." : "Calculate Risk")
+                </button>
+            </div>
+        </div>
+
+        <!-- Results Panel -->
+        <div>
+            @if (_result is null && !_calculating)
+            {
+                <div class="card" style="text-align: center; padding: 48px;">
+                    <i class="ph-thin ph-shield-check" style="font-size: 3rem; color: var(--text-muted);"></i>
+                    <p style="color: var(--text-muted); margin-top: 12px;">Enter trade parameters and click Calculate.</p>
+                </div>
+            }
+            else if (_result is not null)
+            {
+                <!-- Risk Check Status -->
+                <div class="card" style="margin-bottom: 16px; border-left: 3px solid @(_result.PassesRiskCheck ? "var(--accent-green)" : "var(--accent-red)");">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        @if (_result.PassesRiskCheck)
+                        {
+                            <i class="ph-bold ph-check-circle" style="color: var(--accent-green); font-size: 1.2rem;"></i>
+                            <span style="font-weight: 700; color: var(--accent-green);">PASSES RISK CHECK</span>
+                        }
+                        else
+                        {
+                            <i class="ph-bold ph-x-circle" style="color: var(--accent-red); font-size: 1.2rem;"></i>
+                            <span style="font-weight: 700; color: var(--accent-red);">FAILS RISK CHECK</span>
+                        }
+                    </div>
+
+                    @foreach (var v in _result.Violations)
+                    {
+                        <div style="font-size: 0.8rem; color: var(--accent-red); margin-left: 28px;">
+                            <i class="ph-light ph-x" style="margin-right: 4px;"></i>@v
+                        </div>
+                    }
+                    @foreach (var w in _result.Warnings)
+                    {
+                        <div style="font-size: 0.8rem; color: var(--accent-amber); margin-left: 28px;">
+                            <i class="ph-light ph-warning" style="margin-right: 4px;"></i>@w
+                        </div>
+                    }
+                </div>
+
+                <!-- Position Sizing -->
+                <div class="stats-row" style="margin-bottom: 16px;">
+                    <div class="stat-card">
+                        <div class="stat-label"><i class="ph-light ph-hash" style="margin-right: 4px;"></i>Shares</div>
+                        <div class="stat-value">@(_result.ShareCount.ToString("N0"))</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>Position Value</div>
+                        <div class="stat-value">@(_result.PositionValue.ToString("C0"))</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label"><i class="ph-light ph-percent" style="margin-right: 4px;"></i>% of Portfolio</div>
+                        <div class="stat-value">@(_result.PositionPercentOfPortfolio.ToString("F1"))%</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label"><i class="ph-light ph-currency-dollar" style="margin-right: 4px;"></i>Risk Budget</div>
+                        <div class="stat-value">@(_result.RiskAmountDollars.ToString("C0"))</div>
+                    </div>
+                </div>
+
+                <!-- Risk/Reward -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                        <i class="ph-duotone ph-scales" style="margin-right: 6px;"></i>Risk / Reward
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                        <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">Risk per Share</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-red);">@(_result.RiskPerShare.ToString("C2"))</div>
+                        </div>
+                        <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">Reward T1</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-green);">@(_result.RewardPerShare1.ToString("C2"))</div>
+                        </div>
+                        @if (_result.RewardPerShare2.HasValue)
+                        {
+                            <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">Reward T2</div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-green);">@(_result.RewardPerShare2.Value.ToString("C2"))</div>
+                            </div>
+                        }
+                    </div>
+
+                    <!-- R:R Visual Bar -->
+                    <div style="margin-top: 16px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
+                            <span>R:R Ratio (Target 1)</span>
+                            <span style="font-weight: 700; color: @RrColor(_result.RiskRewardRatio1);">@_result.RiskRewardRatio1 : 1</span>
+                        </div>
+                        <div style="height: 8px; background: var(--surface-hover); border-radius: 4px; overflow: hidden;">
+                            <div style="height: 100%; width: @RrBarWidth(_result.RiskRewardRatio1)%; background: @RrColor(_result.RiskRewardRatio1); border-radius: 4px; transition: width 0.3s;"></div>
+                        </div>
+                        @if (_result.RiskRewardRatio2.HasValue)
+                        {
+                            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; margin-top: 8px;">
+                                <span>R:R Ratio (Target 2)</span>
+                                <span style="font-weight: 700; color: @RrColor(_result.RiskRewardRatio2.Value);">@_result.RiskRewardRatio2.Value : 1</span>
+                            </div>
+                            <div style="height: 8px; background: var(--surface-hover); border-radius: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: @RrBarWidth(_result.RiskRewardRatio2.Value)%; background: @RrColor(_result.RiskRewardRatio2.Value); border-radius: 4px; transition: width 0.3s;"></div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Potential Outcomes -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                        <i class="ph-duotone ph-chart-line-up" style="margin-right: 6px;"></i>Potential Outcomes
+                    </div>
+                    @{
+                        var gridCols = _result.PotentialGain2.HasValue ? "1fr 1fr 1fr" : "1fr 1fr";
+                    }
+                    <div style="display: grid; grid-template-columns: @gridCols; gap: 12px;">
+                        <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 12px; text-align: center;">
+                            <div style="font-size: 0.7rem; color: var(--accent-red);">MAX LOSS</div>
+                            @{
+                                var maxLossStr = _result.MaxLoss.ToString("C0");
+                            }
+                            <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-red);">-@maxLossStr</div>
+                            @{
+                                var riskPctStr = _result.RiskPercent.ToString("F1");
+                            }
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">@riskPctStr% of portfolio</div>
+                        </div>
+                        <div style="background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.2); border-radius: 8px; padding: 12px; text-align: center;">
+                            <div style="font-size: 0.7rem; color: var(--accent-green);">GAIN @@ T1</div>
+                            @{
+                                var gainT1Str = _result.PotentialGain1.ToString("C0");
+                            }
+                            <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-green);">+@gainT1Str</div>
+                            @{
+                                var pctT1 = (_result.PotentialGain1 / _result.PortfolioSize * 100).ToString("F1");
+                            }
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">@pctT1% of portfolio</div>
+                        </div>
+                        @if (_result.PotentialGain2.HasValue)
+                        {
+                            <div style="background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.25); border-radius: 8px; padding: 12px; text-align: center;">
+                                <div style="font-size: 0.7rem; color: var(--accent-green);">GAIN @@ T2</div>
+                                @{
+                                    var gainT2Str = _result.PotentialGain2.Value.ToString("C0");
+                                }
+                                <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent-green);">+@gainT2Str</div>
+                                @{
+                                    var pctT2 = (_result.PotentialGain2.Value / _result.PortfolioSize * 100).ToString("F1");
+                                }
+                                <div style="font-size: 0.65rem; color: var(--text-muted);">@pctT2% of portfolio</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Kelly Criterion -->
+                @if (_result.KellyPercent.HasValue)
+                {
+                    <div class="card">
+                        <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                            <i class="ph-duotone ph-brain" style="margin-right: 6px;"></i>Kelly Criterion
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">Optimal Bet Size</div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan);">@(_result.KellyPercent.Value.ToString("F1"))%</div>
+                            </div>
+                            <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">Kelly Position Size</div>
+                                <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan);">@(_result.KellyPositionSize?.ToString("C0"))</div>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px;">
+                            Based on @(_input.WinRate)% win rate and @(_result.RiskRewardRatio1):1 payoff ratio. Most traders use half-Kelly for safety.
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private RiskInputDto _input = new()
+    {
+        Symbol = "AAPL",
+        EntryPrice = 185.00m,
+        StopLoss = 178.00m,
+        Target1 = 200.00m,
+        Target2 = 215.00m,
+        PortfolioSize = 100_000m,
+        RiskPercent = 2.0m,
+        WinRate = 55m
+    };
+
+    private RiskAssessmentDto? _result;
+    private bool _calculating;
+    private string? _error;
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        StateHasChanged();
+    }
+
+    private async Task Calculate()
+    {
+        _error = null;
+        _calculating = true;
+        try
+        {
+            _result = await RiskApi.CalculateAsync(_input);
+            if (_result is null)
+                _error = "Calculation failed — check inputs.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _calculating = false; }
+    }
+
+    private static string RrColor(decimal rr) =>
+        rr >= 2.0m ? "var(--accent-green)" :
+        rr >= 1.5m ? "var(--accent-cyan)" :
+        rr >= 1.0m ? "var(--accent-amber)" :
+        "var(--accent-red)";
+
+    private static int RrBarWidth(decimal rr) =>
+        (int)Math.Min(rr / 4.0m * 100, 100);
+}

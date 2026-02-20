@@ -47,20 +47,91 @@ public class PatternScannerApiClient
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// SCAN RESULT
+// ═══════════════════════════════════════════════════════════════
+
 public class ScanResultData
 {
     public string Symbol { get; set; } = "";
     public int TotalPatterns { get; set; }
     public decimal CurrentPrice { get; set; }
+
+    // Multi-timeframe
+    public string CombinedRegime { get; set; } = "";
+    public decimal CombinedRegimeConfidence { get; set; }
+    public string RegimeAlignment { get; set; } = "";
+    public string DirectionAlignment { get; set; } = "";
+    public decimal AlignmentScore { get; set; }
+    public List<TimeframeSummaryData> TimeframeSummaries { get; set; } = new();
+
+    // Context layers
+    public ContextData? Context { get; set; }
+
+    // Patterns + AI
     public List<ScannedPatternDto> Patterns { get; set; } = new();
     public AIAnalysisData? AIAnalysis { get; set; }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// TIMEFRAME
+// ═══════════════════════════════════════════════════════════════
+
+public class TimeframeSummaryData
+{
+    public string Timeframe { get; set; } = "";
+    public int PatternCount { get; set; }
+    public string DominantDirection { get; set; } = "";
+    public int BullishCount { get; set; }
+    public int BearishCount { get; set; }
+    public string Regime { get; set; } = "";
+    public decimal RegimeConfidence { get; set; }
+    public decimal? RSI { get; set; }
+    public string VolumeProfile { get; set; } = "";
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONTEXT LAYERS
+// ═══════════════════════════════════════════════════════════════
+
+public class ContextData
+{
+    public decimal VolumeRatio { get; set; }
+    public string VolumeProfile { get; set; } = "";
+    public decimal? NearestSupport { get; set; }
+    public decimal? NearestResistance { get; set; }
+    public decimal? DistToSupportPct { get; set; }
+    public decimal? DistToResistancePct { get; set; }
+    public decimal? SMA20 { get; set; }
+    public decimal? SMA50 { get; set; }
+    public decimal? SMA200 { get; set; }
+    public decimal? DistFromSMA200Pct { get; set; }
+    public string MAAlignment { get; set; } = "";
+    public decimal? RSI { get; set; }
+    public string RSIZone { get; set; } = "";
+    public decimal? ATRPercent { get; set; }
+    public int ConsecutiveUpDays { get; set; }
+    public int ConsecutiveDownDays { get; set; }
+    public List<KeyLevelData> KeyLevels { get; set; } = new();
+}
+
+public class KeyLevelData
+{
+    public decimal Price { get; set; }
+    public string Type { get; set; } = "";
+    public int TouchCount { get; set; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PATTERN + AI
+// ═══════════════════════════════════════════════════════════════
 
 public class ScannedPatternDto
 {
     public string PatternName { get; set; } = "";
     public string PatternType { get; set; } = "";
     public string Direction { get; set; } = "";
+    public string Timeframe { get; set; } = "";
     public decimal Confidence { get; set; }
     public decimal HistoricalWinRate { get; set; }
     public string Description { get; set; } = "";
@@ -87,6 +158,10 @@ public class AIAnalysisData
     public decimal? RecommendedTarget { get; set; }
     public string RiskReward { get; set; } = "";
 }
+
+// ═══════════════════════════════════════════════════════════════
+// HISTORY
+// ═══════════════════════════════════════════════════════════════
 
 public class PatternHistoryDto
 {

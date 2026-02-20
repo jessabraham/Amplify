@@ -195,7 +195,16 @@
             StopLoss = signal.StopLoss,
             Target1 = signal.Target1,
             Target2 = signal.Target2,
-            RiskPercent = signal.RiskPercent
+            RiskPercent = signal.RiskPercent,
+            // Include saved risk data if available
+            ShareCount = signal.RiskShareCount,
+            PositionValue = signal.RiskPositionValue,
+            MaxLoss = signal.RiskMaxLoss,
+            RiskRewardRatio = signal.RiskRewardRatio,
+            KellyPercent = signal.RiskKellyPercent,
+            PassesRiskCheck = signal.RiskPassesCheck,
+            PortfolioSize = signal.RiskPortfolioSize,
+            Warnings = signal.RiskWarnings
         };
 
         var response = await AdvisoryApi.AnalyzeSignalAsync(dto);

@@ -13,6 +13,7 @@ public class PatternResult
     public decimal HistoricalWinRate { get; set; }   // typical win rate for this pattern
     public string Description { get; set; } = "";
     public string PatternName { get; set; } = "";
+    public string Timeframe { get; set; } = "Daily"; // 4H, Daily, Weekly
 
     // Suggested trade levels
     public decimal SuggestedEntry { get; set; }

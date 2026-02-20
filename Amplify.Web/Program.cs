@@ -69,6 +69,26 @@ builder.Services.AddHttpClient<PatternScannerApiClient>(client =>
     client.Timeout = TimeSpan.FromMinutes(3);
 });
 
+builder.Services.AddHttpClient<PortfolioApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
+builder.Services.AddHttpClient<RegimeApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
+builder.Services.AddHttpClient<RiskApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
+builder.Services.AddHttpClient<SimulationApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
 builder.Services.AddHttpClient("WatchlistAPI", client =>
 {
     client.BaseAddress = new Uri(apiBase);

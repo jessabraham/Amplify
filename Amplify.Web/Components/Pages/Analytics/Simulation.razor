@@ -1,0 +1,347 @@
+﻿@page "/simulation"
+@rendermode InteractiveServer
+@using Amplify.Web.Services
+@inject SimulationApiClient SimApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-game-controller" style="margin-right: 8px; color: var(--accent-cyan);"></i>Trade Simulation</h1>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" @onclick="ResolveAll" disabled="@_resolving">
+                @if (_resolving)
+                {
+                    <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
+                    <span>Resolving...</span>
+                }
+                else
+                {
+                    <i class="ph-bold ph-play"></i>
+                    <span>Resolve Trades</span>
+                }
+            </button>
+            <button class="btn btn-secondary" @onclick="LoadAll">
+                <i class="ph-bold ph-arrows-clockwise"></i>
+                <span>Refresh</span>
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="login-error" style="margin-bottom: 16px;">
+            <i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_resolveMessage))
+    {
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; color: var(--accent-green); font-size: 0.85rem;">
+            <i class="ph-bold ph-check-circle" style="margin-right: 6px;"></i>@_resolveMessage
+        </div>
+    }
+
+    <!-- ═══ USER STATS ═══ -->
+    @if (_stats is not null && _stats.TotalTrades > 0)
+    {
+        <div class="stats-row" style="margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-hash" style="margin-right: 4px;"></i>Total Trades</div>
+                <div class="stat-value" style="color: var(--accent-cyan);">@_stats.TotalTrades</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-target" style="margin-right: 4px;"></i>Win Rate</div>
+                <div class="stat-value" style="color: @(_stats.WinRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">@_stats.WinRate.ToString("F1")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-trend-up" style="margin-right: 4px;"></i>Avg R-Multiple</div>
+                <div class="stat-value" style="color: @(_stats.AvgRMultiple >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@_stats.AvgRMultiple.ToString("F2")R</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>Total P&L</div>
+                <div class="stat-value" style="color: @(_stats.TotalPnLPercent >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@_stats.TotalPnLPercent.ToString("+0.0;-0.0")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-trophy" style="margin-right: 4px;"></i>Best / Worst</div>
+                <div class="stat-value" style="font-size: 0.85rem;">
+                    <span style="color: var(--accent-green);">+@_stats.BestTrade.ToString("F1")%</span> /
+                    <span style="color: var(--accent-red);">@_stats.WorstTrade.ToString("F1")%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Direction & Alignment Stats -->
+        <div class="stats-row" style="margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-label">Long Win Rate</div>
+                <div class="stat-value" style="color: var(--accent-green);">@_stats.LongWinRate.ToString("F1")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Short Win Rate</div>
+                <div class="stat-value" style="color: var(--accent-red);">@_stats.ShortWinRate.ToString("F1")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-stack" style="margin-right: 4px;"></i>TF Aligned Win</div>
+                <div class="stat-value" style="color: var(--accent-green);">@_stats.AlignedWinRate.ToString("F1")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-warning" style="margin-right: 4px;"></i>TF Conflicting Win</div>
+                <div class="stat-value" style="color: var(--accent-red);">@_stats.ConflictingWinRate.ToString("F1")%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Avg Days Held</div>
+                <div class="stat-value">@_stats.AvgDaysHeld.ToString("F0")</div>
+            </div>
+        </div>
+    }
+    else if (_loaded && _stats?.TotalTrades == 0)
+    {
+        <div class="card" style="text-align: center; padding: 32px; margin-bottom: 20px;">
+            <i class="ph-thin ph-chart-line" style="font-size: 2.5rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); margin-top: 8px;">No resolved trades yet. Create signals from the Trade Planner, then click Resolve Trades to simulate outcomes.</p>
+        </div>
+    }
+
+    <!-- ═══ ACTIVE TRADES ═══ -->
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+        <i class="ph-duotone ph-pulse" style="font-size: 1.1rem; color: var(--accent-amber);"></i>
+        <span style="font-weight: 700; font-size: 1rem; color: var(--text-heading);">Active Trades (@_activeTrades.Count)</span>
+    </div>
+
+    @if (_activeTrades.Any())
+    {
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin-bottom: 24px;">
+            @foreach (var t in _activeTrades)
+            {
+                var dirColor = t.Direction == "Long" ? "var(--accent-green)" : "var(--accent-red)";
+                var daysPct = t.MaxExpirationDays > 0 ? (double)t.DaysHeld / t.MaxExpirationDays * 100 : 0;
+                <div class="card" style="border-left: 3px solid @dirColor; padding: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; color: var(--text-heading);">@t.Asset</span>
+                            <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.05); color: @dirColor; margin-left: 6px;">@t.Direction</span>
+                        </div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted);">Day @t.DaysHeld / @t.MaxExpirationDays</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">Entry</div>
+                            <div class="pattern-level-value" style="color: var(--accent-blue);">@t.EntryPrice.ToString("C2")</div>
+                        </div>
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">Stop</div>
+                            <div class="pattern-level-value" style="color: var(--accent-red);">@t.StopLoss.ToString("C2")</div>
+                        </div>
+                        <div class="pattern-level">
+                            <div class="pattern-level-label">Target</div>
+                            <div class="pattern-level-value" style="color: var(--accent-green);">@t.Target1.ToString("C2")</div>
+                        </div>
+                    </div>
+
+                    <!-- Expiration progress bar -->
+                    <div class="score-bar" style="margin-bottom: 6px;">
+                        <div class="score-bar-fill @(daysPct > 80 ? "low" : daysPct > 50 ? "medium" : "high")" style="width: @(daysPct)%"></div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; font-size: 0.7rem; color: var(--text-muted);">
+                        @if (!string.IsNullOrEmpty(t.Pattern))
+                        {
+                            <span>@t.Pattern</span>
+                        }
+                        @if (!string.IsNullOrEmpty(t.Timeframe))
+                        {
+                            <span>@t.Timeframe</span>
+                        }
+                        @if (!string.IsNullOrEmpty(t.Regime))
+                        {
+                            <span>@t.Regime</span>
+                        }
+                        @if (!string.IsNullOrEmpty(t.TimeframeAlignment))
+                        {
+                            <span>TF: @t.TimeframeAlignment</span>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else if (_loaded)
+    {
+        <div class="card" style="text-align: center; padding: 24px; margin-bottom: 24px;">
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">No active trades. Create signals from the <a href="/planner" style="color: var(--accent-cyan);">Trade Planner</a>.</p>
+        </div>
+    }
+
+    <!-- ═══ TRADE HISTORY ═══ -->
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+        <i class="ph-duotone ph-clock-counter-clockwise" style="font-size: 1.1rem; color: var(--accent-cyan);"></i>
+        <span style="font-weight: 700; font-size: 1rem; color: var(--text-heading);">Trade History (@_history.Count)</span>
+    </div>
+
+    @if (_history.Any())
+    {
+        <div class="card" style="margin-bottom: 24px; overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">
+                        <th style="padding: 8px; text-align: left;">Asset</th>
+                        <th style="padding: 8px;">Dir</th>
+                        <th style="padding: 8px;">Outcome</th>
+                        <th style="padding: 8px;">P&L</th>
+                        <th style="padding: 8px;">R-Mult</th>
+                        <th style="padding: 8px;">Days</th>
+                        <th style="padding: 8px;">Pattern</th>
+                        <th style="padding: 8px;">TF</th>
+                        <th style="padding: 8px;">Regime</th>
+                        <th style="padding: 8px;">TF Align</th>
+                        <th style="padding: 8px;">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _history)
+                    {
+                        var outcomeColor = t.Outcome switch
+                        {
+                                        "HitTarget1" or "HitTarget2" => "var(--accent-green)",
+                                        "HitStop" => "var(--accent-red)",
+                            _ => "var(--accent-amber)"
+                        };
+                        var pnlColor = (t.PnLPercent ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+                        var outcomeLabel = t.Outcome switch
+                        {
+                                        "HitTarget1" => "✓ Target",
+                                        "HitTarget2" => "✓ Target 2",
+                                        "HitStop" => "✗ Stopped",
+                                        "Expired" => "⏱ Expired",
+                            _ => t.Outcome ?? "—"
+                        };
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <td style="padding: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-heading);">@t.Asset</td>
+                            <td style="padding: 8px; text-align: center; color: @(t.Direction == "Long" ? "var(--accent-green)" : "var(--accent-red)");">@t.Direction</td>
+                            <td style="padding: 8px; text-align: center; color: @outcomeColor; font-weight: 600;">@outcomeLabel</td>
+                            <td style="padding: 8px; text-align: center; font-family: 'JetBrains Mono', monospace; color: @pnlColor; font-weight: 700;">@(t.PnLPercent?.ToString("+0.0;-0.0") ?? "—")%</td>
+                            <td style="padding: 8px; text-align: center; font-family: 'JetBrains Mono', monospace; color: @pnlColor;">@(t.RMultiple?.ToString("+0.0;-0.0") ?? "—")R</td>
+                            <td style="padding: 8px; text-align: center;">@t.DaysHeld</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.75rem;">@(t.Pattern ?? "—")</td>
+                            <td style="padding: 8px; text-align: center;">
+                                @if (!string.IsNullOrEmpty(t.Timeframe))
+                                {
+                                    var tfBg = t.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : t.Timeframe == "4H" ? "rgba(255,255,255,0.08)" : "rgba(0,200,200,0.15)";
+                                    <span style="font-size: 0.6rem; padding: 1px 5px; border-radius: 3px; background: @tfBg;">@t.Timeframe</span>
+                                }
+                                else
+                                {
+
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.75rem;">@(t.Regime ?? "—")</td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.7rem;">
+                                @if (!string.IsNullOrEmpty(t.TimeframeAlignment))
+                                {
+                                    var alignCol = t.TimeframeAlignment.Contains("All") ? "var(--accent-green)" : t.TimeframeAlignment == "Conflicting" ? "var(--accent-red)" : "var(--text-muted)";
+                                    <span style="color: @alignCol;">@t.TimeframeAlignment</span>
+                                }
+                                else
+                                {
+
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td style="padding: 8px; text-align: center; font-size: 0.7rem; color: var(--text-muted);">@(t.ResolvedAt?.ToString("MMM d") ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_loaded)
+    {
+        <div class="card" style="text-align: center; padding: 24px; margin-bottom: 24px;">
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">No resolved trades yet.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private List<SimulatedTradeDto> _activeTrades = new();
+    private List<SimulatedTradeDto> _history = new();
+    private UserTradingStatsDto? _stats;
+    private bool _loaded;
+    private bool _resolving;
+    private string? _error;
+    private string? _resolveMessage;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await LoadAll();
+        _loaded = true;
+        StateHasChanged();
+    }
+
+    private async Task LoadAll()
+    {
+        _error = null;
+        _resolveMessage = null;
+
+        try
+        {
+            var activeTask = SimApi.GetActiveTradesAsync();
+            var historyTask = SimApi.GetHistoryAsync(50);
+            var statsTask = SimApi.GetUserStatsAsync();
+
+            await Task.WhenAll(activeTask, historyTask, statsTask);
+
+            _activeTrades = activeTask.Result;
+            _history = historyTask.Result;
+            _stats = statsTask.Result;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ResolveAll()
+    {
+        _resolving = true;
+        _resolveMessage = null;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SimApi.ResolveTradesAsync();
+            if (result is not null && result.ResolvedCount > 0)
+            {
+                _resolveMessage = $"Resolved {result.ResolvedCount} trade(s). Check results below.";
+            }
+            else
+            {
+                _resolveMessage = "No trades resolved — either none are active or none hit target/stop yet.";
+            }
+
+            await LoadAll();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Resolve failed: {ex.Message}";
+        }
+
+        _resolving = false;
+        StateHasChanged();
+    }
+}

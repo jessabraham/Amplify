@@ -61,4 +61,14 @@ public class SignalAnalysisDto
     public decimal Target1 { get; set; }
     public decimal Target2 { get; set; }
     public decimal RiskPercent { get; set; }
+
+    // Risk assessment fields
+    public int? ShareCount { get; set; }
+    public decimal? PositionValue { get; set; }
+    public decimal? MaxLoss { get; set; }
+    public decimal? RiskRewardRatio { get; set; }
+    public decimal? KellyPercent { get; set; }
+    public bool? PassesRiskCheck { get; set; }
+    public decimal? PortfolioSize { get; set; }
+    public string? Warnings { get; set; }
 }

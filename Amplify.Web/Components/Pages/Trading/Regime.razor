@@ -1,0 +1,343 @@
+﻿@page "/regime"
+@rendermode InteractiveServer
+@inject RegimeApiClient RegimeApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@using Amplify.Application.Common.DTOs.Market
+@using Amplify.Application.Common.Models
+@using Amplify.Domain.Enumerations
+@using Amplify.Web.Services
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-wave-sine" style="margin-right: 8px; color: var(--accent-cyan);"></i>Market Regime</h1>
+    </div>
+
+    <!-- Detection Panel -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div style="margin-bottom: 16px;">
+            <span style="font-weight: 600; color: var(--text-heading);"><i class="ph-duotone ph-crosshair" style="margin-right: 6px;"></i>Detect Regime</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-left: 8px;">Classify current market conditions from candle data</span>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+            <div>
+                <label style="font-size: 0.75rem; color: var(--text-muted);">Symbol</label>
+                <input type="text" class="form-input" placeholder="e.g. AAPL" @bind="_symbol"
+                       style="width: 120px; text-transform: uppercase;" />
+            </div>
+            <div>
+                <label style="font-size: 0.75rem; color: var(--text-muted);">Sample Regime</label>
+                <select class="form-input" @bind="_sampleRegime" style="width: 160px;">
+                    <option value="Trending">Trending</option>
+                    <option value="Choppy">Choppy</option>
+                    <option value="VolExpansion">Vol Expansion</option>
+                    <option value="MeanReversion">Mean Reversion</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" @onclick="RunDetection" disabled="@_detecting">
+                <i class="ph-bold ph-play" style="margin-right: 4px;"></i>@(_detecting ? "Detecting..." : "Run Detection")
+            </button>
+            <span style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">
+                Generates 100 sample candles matching the selected profile, then classifies.
+            </span>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div style="color: var(--accent-red); font-size: 0.8rem; margin-top: 10px;">@_error</div>
+        }
+    </div>
+
+    <!-- Current Result -->
+    @if (_result is not null)
+    {
+        var regimeClass = _result.Regime.ToString().ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
+
+        <div class="card" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <span style="font-weight: 600; color: var(--text-heading);">
+                    <i class="ph-duotone ph-chart-line-up" style="margin-right: 6px;"></i>Detection Result — @_result.Symbol
+                </span>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">@_result.DetectedAt.ToString("MMM dd, HH:mm:ss")</span>
+            </div>
+
+            <!-- Regime Badge + Confidence -->
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px;">
+                <span class="regime-badge @regimeClass" style="font-size: 1rem; padding: 8px 20px;">
+                    @RegimeIcon(_result.Regime)
+                    @_result.Regime
+                </span>
+                <div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">Confidence</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: @ConfidenceColor(_result.Confidence);">
+                        @_result.Confidence.ToString("F1")%
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rationale -->
+            <div style="background: var(--surface-hover); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 4px;">Rationale</div>
+                <div style="font-size: 0.85rem; color: var(--text-heading); line-height: 1.5;">
+                    @foreach (var reason in _result.Rationale.Split("; "))
+                    {
+                        <div style="margin-bottom: 2px;">
+                            <i class="ph-light ph-check-circle" style="color: var(--accent-green); margin-right: 4px;"></i>@reason
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Feature Vector Summary -->
+            @if (_result.Features is not null)
+            {
+                var f = _result.Features;
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 8px;">Key Indicators</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
+                    <div class="indicator-card">
+                        <div class="indicator-label">RSI</div>
+                        <div class="indicator-value" style="color: @RsiColor(f.RSI);">@f.RSI.ToString("F1")</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">MACD</div>
+                        <div class="indicator-value">@f.MACD.ToString("F4")</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">ATR %</div>
+                        <div class="indicator-value">@f.ATRPercent.ToString("F2")%</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">BB Width</div>
+                        <div class="indicator-value">@f.BollingerWidth.ToString("F2")%</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">SMA20 Slope</div>
+                        <div class="indicator-value" style="color: @(f.SMA20Slope >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                            @(f.SMA20Slope >= 0 ? "+" : "")@f.SMA20Slope.ToString("F2")%
+                        </div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">SMA20</div>
+                        <div class="indicator-value">@f.SMA20.ToString("C2")</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">SMA50</div>
+                        <div class="indicator-value">@f.SMA50.ToString("C2")</div>
+                    </div>
+                    <div class="indicator-card">
+                        <div class="indicator-label">Price</div>
+                        <div class="indicator-value">@f.CurrentPrice.ToString("C2")</div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- History -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span style="font-weight: 600; color: var(--text-heading);">
+                <i class="ph-duotone ph-clock-counter-clockwise" style="margin-right: 6px;"></i>Detection History
+            </span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" class="form-input" placeholder="Symbol" @bind="_historySymbol"
+                       style="width: 100px; font-size: 0.8rem; text-transform: uppercase;" />
+                <button class="btn btn-secondary" style="font-size: 0.8rem;" @onclick="LoadHistory">
+                    <i class="ph-light ph-magnifying-glass" style="margin-right: 4px;"></i>Load
+                </button>
+            </div>
+        </div>
+
+        @if (_history.Count == 0)
+        {
+            <div style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;">
+                No regime history yet. Run a detection above or search by symbol.
+            </div>
+        }
+        else
+        {
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <th style="text-align: left; padding: 8px; color: var(--text-muted); font-weight: 500;">Symbol</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-muted); font-weight: 500;">Regime</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-muted); font-weight: 500;">Confidence</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-muted); font-weight: 500;">Detected</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in _history)
+                        {
+                            var rc = h.Regime.ToString().ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
+                            <tr style="border-bottom: 1px solid var(--border);">
+                                <td style="padding: 8px; font-weight: 600; font-family: 'JetBrains Mono', monospace;">@h.Symbol</td>
+                                <td style="padding: 8px;"><span class="regime-badge @rc" style="font-size: 0.7rem;">@h.Regime</span></td>
+                                <td style="padding: 8px; color: @ConfidenceColor(h.Confidence); font-weight: 600;">@h.Confidence.ToString("F1")%</td>
+                                <td style="padding: 8px; color: var(--text-muted);">@h.DetectedAt.ToString("MMM dd, HH:mm")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .indicator-card {
+        background: var(--surface-hover);
+        border-radius: 6px;
+        padding: 10px 12px;
+    }
+
+    .indicator-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .indicator-value {
+        font-size: 1rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-heading);
+        margin-top: 2px;
+    }
+</style>
+
+@code {
+    private string _symbol = "AAPL";
+    private string _sampleRegime = "Trending";
+    private bool _detecting;
+    private string? _error;
+    private RegimeResultDto? _result;
+
+    private string _historySymbol = "";
+    private List<RegimeHistoryDto> _history = [];
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        StateHasChanged();
+    }
+
+    private async Task RunDetection()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_symbol))
+        { _error = "Symbol is required."; return; }
+
+        _detecting = true;
+        try
+        {
+            var candles = GenerateSampleCandles(_sampleRegime, 100);
+            _result = await RegimeApi.DetectRegimeAsync(_symbol.ToUpper(), candles);
+
+            if (_result is null)
+                _error = "Detection failed — check API logs.";
+            else
+            {
+                _historySymbol = _symbol.ToUpper();
+                await LoadHistory();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _detecting = false; }
+    }
+
+    private async Task LoadHistory()
+    {
+        if (string.IsNullOrWhiteSpace(_historySymbol)) return;
+        try { _history = await RegimeApi.GetHistoryAsync(_historySymbol.ToUpper()); }
+        catch { /* swallow */ }
+    }
+
+    // ── Sample Candle Generator ──────────────────────────────────────
+    // Generates synthetic OHLCV data that exhibits the selected regime characteristics.
+
+    private static List<Candle> GenerateSampleCandles(string regime, int count)
+    {
+        var rng = new Random(42);
+        var candles = new List<Candle>();
+        var basePrice = 150m;
+
+        for (int i = 0; i < count; i++)
+        {
+            var noise = (decimal)(rng.NextDouble() - 0.5) * 2;
+            decimal drift, volatility;
+
+            switch (regime)
+            {
+                case "Trending":
+                    drift = 0.3m + (decimal)rng.NextDouble() * 0.2m;
+                    volatility = 1.5m;
+                    break;
+                case "VolExpansion":
+                    drift = (decimal)(rng.NextDouble() - 0.5) * 1.5m;
+                    volatility = 4.0m + (decimal)rng.NextDouble() * 2m;
+                    break;
+                case "MeanReversion":
+                    // Oscillate around base with RSI-triggering swings
+                    drift = -((basePrice + i * 0.05m) - 150m) * 0.05m;
+                    volatility = 1.8m;
+                    break;
+                default: // Choppy
+                    drift = (decimal)(rng.NextDouble() - 0.5) * 0.1m;
+                    volatility = 0.8m;
+                    break;
+            }
+
+            var open = basePrice;
+            var change = drift + noise * volatility;
+            var close = open + change;
+            var high = Math.Max(open, close) + Math.Abs(noise) * volatility * 0.5m;
+            var low = Math.Min(open, close) - Math.Abs(noise) * volatility * 0.5m;
+            var volume = 1_000_000m + (decimal)rng.Next(-200000, 200000);
+
+            candles.Add(new Candle
+            {
+                Time = DateTime.UtcNow.AddDays(-count + i),
+                Open = Math.Round(Math.Max(open, 1), 2),
+                High = Math.Round(Math.Max(high, 1), 2),
+                Low = Math.Round(Math.Max(low, 1), 2),
+                Close = Math.Round(Math.Max(close, 1), 2),
+                Volume = Math.Max(volume, 10000)
+            });
+
+            basePrice = close;
+        }
+
+        return candles;
+    }
+
+    private static string RegimeIcon(MarketRegime regime) => regime switch
+    {
+        MarketRegime.Trending => "📈 ",
+        MarketRegime.Choppy => "〰️ ",
+        MarketRegime.VolExpansion => "💥 ",
+        MarketRegime.MeanReversion => "🔄 ",
+        _ => ""
+    };
+
+    private static string ConfidenceColor(decimal confidence) =>
+        confidence >= 70 ? "var(--accent-green)" :
+        confidence >= 50 ? "var(--accent-amber)" :
+        "var(--accent-red)";
+
+    private static string RsiColor(decimal rsi) =>
+        rsi > 70 ? "var(--accent-red)" :
+        rsi < 30 ? "var(--accent-green)" :
+        "var(--text-heading)";
+}
