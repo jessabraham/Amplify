@@ -51,9 +51,11 @@ public class PortfolioApiClient
     {
         AttachToken();
         var response = await _http.PostAsJsonAsync("api/Portfolio/positions", dto);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadFromJsonAsync<PositionDto>()
-            : null;
+        if (response.IsSuccessStatusCode)
+            return await response.Content.ReadFromJsonAsync<PositionDto>();
+
+        var error = await response.Content.ReadAsStringAsync();
+        throw new Exception(error);
     }
 
     // Close a position
@@ -64,6 +66,14 @@ public class PortfolioApiClient
         return response.IsSuccessStatusCode
             ? await response.Content.ReadFromJsonAsync<PositionDto>()
             : null;
+    }
+
+    // Delete a position
+    public async Task<bool> DeletePositionAsync(Guid id)
+    {
+        AttachToken();
+        var response = await _http.DeleteAsync($"api/Portfolio/positions/{id}");
+        return response.IsSuccessStatusCode;
     }
 
     // Snapshots

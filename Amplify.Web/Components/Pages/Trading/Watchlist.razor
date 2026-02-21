@@ -1,10 +1,14 @@
 ﻿@page "/watchlist"
 @rendermode InteractiveServer
 @using Amplify.Web.Services
+@using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Domain.Enumerations
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WatchlistApiClient WatchlistApi
+@inject SignalApiClient SignalApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
+@inject IConfiguration Config
 @implements IAsyncDisposable
 
 <div class="fade-in">
@@ -228,6 +232,10 @@
                                 @onclick="() => GoToPlanner(item.Symbol)">
                             <i class="ph ph-path" style="font-size: 0.85rem; color: var(--accent-cyan);"></i>
                         </button>
+                        <button class="watchlist-btn" title="Create Signal"
+                                @onclick="() => CreateSignalFromWatchlist(item)" @onclick:stopPropagation="true">
+                            <i class="ph ph-lightning" style="font-size: 0.85rem; color: var(--accent-amber);"></i>
+                        </button>
                         <button class="watchlist-btn watchlist-btn-danger" title="Remove"
                                 @onclick="() => RemoveItem(item)">
                             <i class="ph ph-trash" style="font-size: 0.85rem;"></i>
@@ -280,10 +288,10 @@
         try
         {
             var token = AuthState.Token;
-            var baseUri = Nav.BaseUri.TrimEnd('/');
+            var apiBase = Config["ApiBaseUrl"]?.TrimEnd('/') ?? Nav.BaseUri.TrimEnd('/');
 
             _hubConnection = new HubConnectionBuilder()
-                .WithUrl($"{baseUri}/hubs/pattern-scan", options =>
+                .WithUrl($"{apiBase}/hubs/pattern-scan", options =>
                 {
                     options.AccessTokenProvider = () => Task.FromResult<string?>(token);
                 })
@@ -405,6 +413,27 @@
     private void GoToPlanner(string symbol)
     {
         Nav.NavigateTo($"/planner?symbol={symbol}");
+    }
+
+    private async Task CreateSignalFromWatchlist(WatchlistItemData item)
+    {
+        var isCrypto = item.Symbol.Contains("USD") || item.Symbol.Contains("BTC") || item.Symbol.Contains("ETH");
+
+        var dto = new TradeSignalDto
+        {
+            Asset = item.Symbol,
+            AssetClass = isCrypto ? AssetClass.Crypto : AssetClass.Stock,
+            SignalType = (item.LastBias?.Contains("Bearish", StringComparison.OrdinalIgnoreCase) == true)
+                ? SignalType.Short : SignalType.Long,
+            Source = SignalSource.Manual,
+            Regime = MarketRegime.Trending
+        };
+
+        var result = await SignalApi.CreateSignalAsync(dto);
+        if (result is not null)
+        {
+            Nav.NavigateTo("/signals");
+        }
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)

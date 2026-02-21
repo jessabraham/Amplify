@@ -28,6 +28,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     // AI
     public DbSet<AIAnalytic> AIAnalytics => Set<AIAnalytic>();
+    public DbSet<PortfolioAdvice> PortfolioAdvices => Set<PortfolioAdvice>();
     public DbSet<DetectedPattern> DetectedPatterns => Set<DetectedPattern>();
     public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
     public DbSet<SimulatedTrade> SimulatedTrades => Set<SimulatedTrade>();

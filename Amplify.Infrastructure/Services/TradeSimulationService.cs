@@ -1,4 +1,5 @@
-﻿using Amplify.Application.Common.Models;
+﻿using Amplify.Application.Common.Interfaces.Market;
+using Amplify.Application.Common.Models;
 using Amplify.Domain.Entities.Trading;
 using Amplify.Domain.Enumerations;
 using Amplify.Infrastructure.Persistence;
@@ -10,18 +11,20 @@ namespace Amplify.Infrastructure.Services;
 /// <summary>
 /// Manages the full lifecycle of simulated trades:
 /// 1. Creates a SimulatedTrade when a signal is saved
-/// 2. Resolves open trades against new price data
+/// 2. Resolves open trades against new price data (real Alpaca data when available)
 /// 3. Updates PatternPerformance aggregates after resolution
 /// 4. Provides stats for the AI feedback loop
 /// </summary>
 public class TradeSimulationService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IMarketDataService _marketData;
     private readonly ILogger<TradeSimulationService> _logger;
 
-    public TradeSimulationService(ApplicationDbContext context, ILogger<TradeSimulationService> logger)
+    public TradeSimulationService(ApplicationDbContext context, IMarketDataService marketData, ILogger<TradeSimulationService> logger)
     {
         _context = context;
+        _marketData = marketData;
         _logger = logger;
     }
 
@@ -110,17 +113,50 @@ public class TradeSimulationService
         var activeTrades = await query.ToListAsync();
         var resolved = new List<SimulatedTrade>();
 
-        foreach (var trade in activeTrades)
-        {
-            // Generate simulated price movement since entry
-            var priceData = SimulatePriceMovement(trade);
+        // Group trades by asset to minimize API calls
+        var tradesByAsset = activeTrades.GroupBy(t => t.Asset);
 
-            var wasResolved = ProcessTradeAgainstPrices(trade, priceData);
-            if (wasResolved)
+        foreach (var group in tradesByAsset)
+        {
+            var symbol = group.Key;
+            List<Candle> candles;
+
+            try
             {
-                resolved.Add(trade);
-                _logger.LogInformation("Resolved trade {TradeId}: {Asset} {Outcome} P&L: {PnL:F2}%",
-                    trade.Id, trade.Asset, trade.Outcome, trade.PnLPercent);
+                // Fetch real price data from Alpaca (or fallback to sample)
+                // Get enough bars to cover from the earliest trade entry
+                var earliestEntry = group.Min(t => t.ActivatedAt ?? t.CreatedAt);
+                var daysSince = (int)(DateTime.UtcNow - earliestEntry).TotalDays + 5;
+                candles = await _marketData.GetCandlesAsync(symbol, Math.Max(daysSince, 30), "Daily");
+
+                _logger.LogDebug("Fetched {Count} candles for {Symbol} from {Source} to resolve trades",
+                    candles.Count, symbol, _marketData.DataSource);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch candles for {Symbol} — skipping resolution", symbol);
+                continue;
+            }
+
+            foreach (var trade in group)
+            {
+                // Get only candles AFTER the trade was activated
+                var entryDate = trade.ActivatedAt ?? trade.CreatedAt;
+                var relevantCandles = candles
+                    .Where(c => c.Time > entryDate.Date)
+                    .OrderBy(c => c.Time)
+                    .Skip(trade.DaysHeld) // Skip already-processed days
+                    .ToList();
+
+                if (!relevantCandles.Any()) continue;
+
+                var wasResolved = ProcessTradeAgainstPrices(trade, relevantCandles);
+                if (wasResolved)
+                {
+                    resolved.Add(trade);
+                    _logger.LogInformation("Resolved trade {TradeId}: {Asset} {Outcome} P&L: {PnL:F2}% (real data from {Source})",
+                        trade.Id, trade.Asset, trade.Outcome, trade.PnLPercent, _marketData.DataSource);
+                }
             }
         }
 
@@ -449,40 +485,35 @@ public class TradeSimulationService
     /// Simulates price movement for an active trade.
     /// Replace with real Alpaca data when connected.
     /// </summary>
-    private List<Candle> SimulatePriceMovement(SimulatedTrade trade)
+    // SimulatePriceMovement removed — now using real Alpaca market data via IMarketDataService
+
+    // ═══════════════════════════════════════════════════════════════════
+    // DELETE
+    // ═══════════════════════════════════════════════════════════════════
+
+    public async Task<bool> DeleteTradeAsync(Guid tradeId, string userId)
     {
-        var candles = new List<Candle>();
-        var random = new Random(trade.Id.GetHashCode() + DateTime.UtcNow.DayOfYear);
-        var price = trade.EntryPrice;
-        var daysSinceEntry = (DateTime.UtcNow - (trade.ActivatedAt ?? trade.CreatedAt)).Days;
-        var daysToSimulate = Math.Max(1, daysSinceEntry - trade.DaysHeld);
+        var trade = await _context.SimulatedTrades
+            .FirstOrDefaultAsync(t => t.Id == tradeId && t.UserId == userId);
+        if (trade is null) return false;
 
-        // Bias toward target or stop based on pattern confidence
-        var bias = (trade.PatternConfidence ?? 55) > 60 ? 0.02 : -0.01;
-        if (trade.Direction == SignalType.Short) bias = -bias;
+        _context.SimulatedTrades.Remove(trade);
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("🗑️ Deleted simulated trade {TradeId} ({Asset})", tradeId, trade.Asset);
+        return true;
+    }
 
-        for (int i = 0; i < daysToSimulate && i < 30; i++)
-        {
-            var volatility = price * 0.015m; // 1.5% daily volatility
-            var drift = (decimal)(random.NextDouble() * (double)volatility * 2 - (double)volatility) + (decimal)bias * volatility;
-            var open = price;
-            var close = price + drift;
-            var high = Math.Max(open, close) + (decimal)random.NextDouble() * volatility * 0.5m;
-            var low = Math.Min(open, close) - (decimal)random.NextDouble() * volatility * 0.5m;
+    public async Task<int> ClearAllTradesAsync(string userId)
+    {
+        var trades = await _context.SimulatedTrades
+            .Where(t => t.UserId == userId)
+            .ToListAsync();
+        if (!trades.Any()) return 0;
 
-            candles.Add(new Candle
-            {
-                Time = (trade.ActivatedAt ?? trade.CreatedAt).AddDays(trade.DaysHeld + i),
-                Open = open,
-                High = high,
-                Low = low,
-                Close = close,
-                Volume = 5000000
-            });
-            price = close;
-        }
-
-        return candles;
+        _context.SimulatedTrades.RemoveRange(trades);
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("🗑️ Cleared {Count} simulated trades for user {UserId}", trades.Count, userId);
+        return trades.Count;
     }
 }
 

@@ -74,6 +74,11 @@ builder.Services.AddHttpClient<PortfolioApiClient>(client =>
     client.BaseAddress = new Uri(apiBase);
 });
 
+builder.Services.AddHttpClient<PortfolioAdvisorApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
 builder.Services.AddHttpClient<RegimeApiClient>(client =>
 {
     client.BaseAddress = new Uri(apiBase);

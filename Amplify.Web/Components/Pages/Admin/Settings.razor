@@ -168,6 +168,125 @@
             }
         </div>
 
+        <!-- Portfolio Capital Section -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-bank" style="margin-right: 6px;"></i>Portfolio Capital</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div>
+                    <label class="form-label">Starting Capital ($)</label>
+                    <input type="number" class="form-input" @bind="_startingCapital" min="100" step="1000" />
+                </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 12px;">
+                <button class="btn btn-primary" @onclick="SaveStartingCapital">
+                    <i class="ph-bold ph-floppy-disk"></i>
+                    <span>Save Capital</span>
+                </button>
+                @if (!string.IsNullOrEmpty(_capitalMessage))
+                {
+                    <span style="font-size: 0.8rem; color: @(_capitalError ? "var(--accent-red)" : "var(--accent-green)");">
+                        @_capitalMessage
+                    </span>
+                }
+            </div>
+
+            @if (_portfolioBalance is not null)
+            {
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px;">
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-wallet" style="margin-right: 4px;"></i>Portfolio Value</div>
+                        <div class="settings-info-value" style="color: var(--accent-cyan);">@(_portfolioBalance.PortfolioValue.ToString("C0"))</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>Cash Available</div>
+                        <div class="settings-info-value" style="color: var(--accent-green);">@(_portfolioBalance.CashAvailable.ToString("C0"))</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>Invested in Positions</div>
+                        <div class="settings-info-value">@(_portfolioBalance.TotalInvested.ToString("C0"))</div>
+                    </div>
+                </div>
+            }
+
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 10px;">
+                <i class="ph-light ph-info" style="margin-right: 4px;"></i>Your starting capital determines cash available for new trades. Update it anytime to match your actual brokerage balance.
+            </div>
+        </div>
+
+        <!-- AI Trading Budget Section -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title"><i class="ph-duotone ph-robot" style="margin-right: 6px;"></i>AI Trading Budget</span>
+            </div>
+
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+                Allocate a percentage of your cash for the AI to auto-trade. Set to 0% for simulation only.
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 16px; max-width: 500px;">
+                <div style="flex: 1;">
+                    <label class="form-label">AI Budget (%)</label>
+                    <input type="range" min="0" max="50" step="1" @bind="_aiBudgetPercent" @bind:event="oninput"
+                           style="width: 100%; accent-color: var(--accent-cyan);" />
+                </div>
+                <div style="min-width: 80px;">
+                    <input type="number" class="form-input" min="0" max="100" step="1" @bind="_aiBudgetPercent"
+                           style="text-align: center; font-weight: 700;" />
+                </div>
+            </div>
+
+            @if (_portfolioBalance is not null)
+            {
+                var budgetDollars = _portfolioBalance.CashAvailable * _aiBudgetPercent / 100m;
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 14px;">
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-robot" style="margin-right: 4px;"></i>AI Budget</div>
+                        <div class="settings-info-value" style="color: @(_aiBudgetPercent > 0 ? "var(--accent-cyan)" : "var(--text-muted)");">
+                            @(budgetDollars.ToString("C0"))
+                        </div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>AI Cash Used</div>
+                        <div class="settings-info-value">@(_portfolioBalance.AiCashUsed.ToString("C0"))</div>
+                    </div>
+                    <div class="settings-info-card">
+                        <div class="settings-info-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>AI Cash Remaining</div>
+                        <div class="settings-info-value" style="color: var(--accent-green);">@(Math.Max(budgetDollars - _portfolioBalance.AiCashUsed, 0).ToString("C0"))</div>
+                    </div>
+                </div>
+            }
+
+            @if (_aiBudgetPercent == 0)
+            {
+                <div style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: rgba(255,255,255,0.03); border-left: 3px solid var(--accent-amber);">
+                    <span style="font-size: 0.8rem; color: var(--accent-amber);"><i class="ph-bold ph-info" style="margin-right: 4px;"></i>Simulation Only — AI will scan and analyze patterns but won't create real positions.</span>
+                </div>
+            }
+            else
+            {
+                <div style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: rgba(255,255,255,0.03); border-left: 3px solid var(--accent-cyan);">
+                    <span style="font-size: 0.8rem; color: var(--accent-cyan);"><i class="ph-bold ph-lightning" style="margin-right: 4px;"></i>AI Auto-Trading Active — High-confidence signals will create real positions using up to @(_aiBudgetPercent)% of your cash.</span>
+                </div>
+            }
+
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 12px;">
+                <button class="btn btn-primary" @onclick="SaveAiBudget">
+                    <i class="ph-bold ph-floppy-disk"></i>
+                    <span>Save AI Budget</span>
+                </button>
+                @if (!string.IsNullOrEmpty(_aiBudgetMessage))
+                {
+                    <span style="font-size: 0.8rem; color: @(_aiBudgetError ? "var(--accent-red)" : "var(--accent-green)");">
+                        @_aiBudgetMessage
+                    </span>
+                }
+            </div>
+        </div>
+
         <!-- Risk Defaults Section -->
         <div class="card">
             <div class="card-header">
@@ -188,10 +307,6 @@
                     <div class="settings-info-card">
                         <div class="settings-info-label"><i class="ph-light ph-currency-dollar" style="margin-right: 4px;"></i>Max Position Size</div>
                         <div class="settings-info-value">@_riskConfig.MaxPositionSize.ToString("$#,##0")</div>
-                    </div>
-                    <div class="settings-info-card">
-                        <div class="settings-info-label"><i class="ph-light ph-wallet" style="margin-right: 4px;"></i>Default Portfolio Size</div>
-                        <div class="settings-info-value">@_riskConfig.DefaultPortfolioSize.ToString("$#,##0")</div>
                     </div>
                 </div>
 
@@ -249,6 +364,17 @@
     private RiskConfigData? _riskConfig;
     private double _riskGaugePosition;
 
+    // Portfolio Capital
+    private PortfolioBalanceData? _portfolioBalance;
+    private decimal _startingCapital = 100_000;
+    private string _capitalMessage = "";
+    private bool _capitalError;
+
+    // AI Trading Budget
+    private decimal _aiBudgetPercent;
+    private string _aiBudgetMessage = "";
+    private bool _aiBudgetError;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _loaded) return;
@@ -272,6 +398,14 @@
 
             _aiConfig = await SettingsApi.GetAIConfigAsync();
             _riskConfig = await SettingsApi.GetRiskConfigAsync();
+
+            // Load portfolio balance
+            _portfolioBalance = await SettingsApi.GetPortfolioBalanceAsync();
+            if (_portfolioBalance is not null)
+            {
+                _startingCapital = _portfolioBalance.StartingCapital;
+                _aiBudgetPercent = _portfolioBalance.AiTradingBudgetPercent;
+            }
 
             if (_riskConfig is not null)
             {
@@ -346,6 +480,58 @@
         else
         {
             _passwordError = error;
+        }
+    }
+
+    private async Task SaveStartingCapital()
+    {
+        _capitalMessage = "";
+        _capitalError = false;
+
+        if (_startingCapital < 100)
+        {
+            _capitalMessage = "Minimum starting capital is $100.";
+            _capitalError = true;
+            return;
+        }
+
+        var success = await SettingsApi.UpdateStartingCapitalAsync(_startingCapital);
+        if (success)
+        {
+            _capitalMessage = $"Starting capital updated to {_startingCapital:C0}.";
+            _portfolioBalance = await SettingsApi.GetPortfolioBalanceAsync();
+        }
+        else
+        {
+            _capitalMessage = "Failed to update starting capital.";
+            _capitalError = true;
+        }
+    }
+
+    private async Task SaveAiBudget()
+    {
+        _aiBudgetMessage = "";
+        _aiBudgetError = false;
+
+        if (_aiBudgetPercent < 0 || _aiBudgetPercent > 100)
+        {
+            _aiBudgetMessage = "AI budget must be between 0% and 100%.";
+            _aiBudgetError = true;
+            return;
+        }
+
+        var success = await SettingsApi.UpdateAiBudgetAsync(_aiBudgetPercent);
+        if (success)
+        {
+            _aiBudgetMessage = _aiBudgetPercent == 0
+                ? "AI trading disabled — simulation only."
+                : $"AI budget set to {_aiBudgetPercent}%.";
+            _portfolioBalance = await SettingsApi.GetPortfolioBalanceAsync();
+        }
+        else
+        {
+            _aiBudgetMessage = "Failed to update AI budget.";
+            _aiBudgetError = true;
         }
     }
 }

@@ -40,4 +40,7 @@ public class PatternVerdict
     public bool IsValid { get; set; }
     public string Grade { get; set; } = "";
     public string OneLineReason { get; set; } = "";
+    public decimal? Entry { get; set; }
+    public decimal? Stop { get; set; }
+    public decimal? Target { get; set; }
 }

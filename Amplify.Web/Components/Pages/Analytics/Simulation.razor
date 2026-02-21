@@ -25,6 +25,13 @@
                 <i class="ph-bold ph-arrows-clockwise"></i>
                 <span>Refresh</span>
             </button>
+            @if (_activeTrades.Any() || _history.Any())
+            {
+                <button class="btn btn-secondary" @onclick="ClearAllTrades" style="color: var(--accent-red);">
+                    <i class="ph-bold ph-trash"></i>
+                    <span>Clear All</span>
+                </button>
+            }
         </div>
     </div>
 
@@ -122,7 +129,14 @@
                             <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; color: var(--text-heading);">@t.Asset</span>
                             <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.05); color: @dirColor; margin-left: 6px;">@t.Direction</span>
                         </div>
-                        <span style="font-size: 0.7rem; color: var(--text-muted);">Day @t.DaysHeld / @t.MaxExpirationDays</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.7rem; color: var(--text-muted);">Day @t.DaysHeld / @t.MaxExpirationDays</span>
+                            <button @onclick="() => DeleteTrade(t.Id)" @onclick:stopPropagation="true"
+                                    style="background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; transition: all 0.15s;"
+                                    class="delete-btn" title="Remove trade">
+                                <i class="ph ph-x"></i>
+                            </button>
+                        </div>
                     </div>
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
@@ -197,6 +211,7 @@
                         <th style="padding: 8px;">Regime</th>
                         <th style="padding: 8px;">TF Align</th>
                         <th style="padding: 8px;">Date</th>
+                        <th style="padding: 8px; width: 36px;"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -251,6 +266,13 @@
                                 }
                             </td>
                             <td style="padding: 8px; text-align: center; font-size: 0.7rem; color: var(--text-muted);">@(t.ResolvedAt?.ToString("MMM d") ?? "—")</td>
+                            <td style="padding: 8px; text-align: center;">
+                                <button @onclick="() => DeleteTrade(t.Id)"
+                                        style="background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 0.7rem; padding: 2px; border-radius: 3px; transition: all 0.15s; opacity: 0.5;"
+                                        class="delete-btn" title="Remove">
+                                    <i class="ph ph-x"></i>
+                                </button>
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -343,5 +365,29 @@
 
         _resolving = false;
         StateHasChanged();
+    }
+
+    private async Task DeleteTrade(Guid tradeId)
+    {
+        var success = await SimApi.DeleteTradeAsync(tradeId);
+        if (success)
+        {
+            _activeTrades.RemoveAll(t => t.Id == tradeId);
+            _history.RemoveAll(t => t.Id == tradeId);
+            _stats = await SimApi.GetUserStatsAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearAllTrades()
+    {
+        var count = await SimApi.ClearAllTradesAsync();
+        if (count > 0)
+        {
+            _activeTrades.Clear();
+            _history.Clear();
+            _stats = await SimApi.GetUserStatsAsync();
+            StateHasChanged();
+        }
     }
 }

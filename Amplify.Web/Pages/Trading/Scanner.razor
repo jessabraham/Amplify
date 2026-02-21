@@ -4,6 +4,7 @@
 @inject PatternScannerApiClient ScannerApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <div class="fade-in">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -47,7 +48,7 @@
                 @if (_scanning)
                 {
                     <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite;"></i>
-                    <span>Scanning 4H + Daily + Weekly...</span>
+                    <span>Scanning 1H + 4H + Daily + Weekly...</span>
                 }
                 else
                 {
@@ -86,7 +87,7 @@
                 @_result.CurrentPrice.ToString("C")
             </span>
             <span style="font-size: 0.8rem; color: var(--text-muted);">
-                @_result.TotalPatterns patterns across 3 timeframes
+                @_result.TotalPatterns patterns across 4 timeframes
             </span>
         </div>
 
@@ -330,11 +331,11 @@
                     </div>
                 }
 
-                @if (_result.Patterns.Any(p => !string.IsNullOrEmpty(p.AIGrade)))
+                @if (_result.Patterns.Any(p => p.Timeframe == _chartTimeframe && !string.IsNullOrEmpty(p.AIGrade)))
                 {
                     <div>
                         <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">Pattern Verdicts</div>
-                        @foreach (var p in _result.Patterns.Where(p => !string.IsNullOrEmpty(p.AIGrade)))
+                        @foreach (var p in _result.Patterns.Where(p => p.Timeframe == _chartTimeframe && !string.IsNullOrEmpty(p.AIGrade)))
                         {
                             var gradeColor = p.AIGrade switch
                             {
@@ -343,7 +344,7 @@
                                                     "C" => "var(--accent-amber)",
                                 _ => "var(--accent-red)"
                             };
-                            var tfBadge = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "4H" ? "rgba(255,255,255,0.05)" : "rgba(0,200,200,0.15)";
+                            var tfBadge = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "1H" ? "rgba(255,255,255,0.05)" : "rgba(0,200,200,0.15)";
 
                             <div style="display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border);">
                                 <span style="font-size: 0.55rem; padding: 1px 5px; border-radius: 3px; background: @tfBadge; min-width: 36px; text-align: center;">@p.Timeframe</span>
@@ -371,30 +372,165 @@
             </a>
         </div>
 
-        <!-- ═══ PATTERN CARDS ═══ -->
-        @if (_result.Patterns.Count > 0)
+        <!-- ═══ PATTERN CHART OVERLAY ═══ -->
+        @if (_result.ChartCandles.Any())
         {
+            <div class="card" style="margin-bottom: 20px; padding: 0; overflow: hidden;">
+                <!-- Header -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="ph-duotone ph-chart-line" style="font-size: 1.1rem; color: var(--accent-cyan);"></i>
+                        <span style="font-weight: 700; color: var(--text-heading);">@_result.Symbol Chart</span>
+                        <div style="display: flex; gap: 2px; background: rgba(255,255,255,0.04); border-radius: 6px; padding: 2px;">
+                            @foreach (var tf in new[] { "1H", "4H", "Daily", "Weekly" })
+                            {
+                                var isActive = _chartTimeframe == tf;
+                                var patternCount = _result.Patterns.Count(p => p.Timeframe == tf);
+                                <button @onclick="() => SwitchChartTimeframe(tf)"
+                                        style="font-size: 0.6rem; padding: 2px 10px; border-radius: 4px; border: none; cursor: pointer;
+                                                       background: @(isActive ? "rgba(6,182,212,0.25)" : "transparent");
+                                                       color: @(isActive ? "var(--accent-cyan)" : "var(--text-muted)");
+                                                       font-weight: @(isActive ? "700" : "500"); transition: all 0.15s;">
+                                    @tf
+                                    @if (patternCount > 0)
+                                    {
+                                        <span style="opacity: 0.5; margin-left: 2px;">@patternCount</span>
+                                    }
+                                </button>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(_result.DataSource))
+                        {
+                            var isLive = _result.DataSource == "Alpaca";
+                            <span style="font-size: 0.6rem; background: @(isLive ? "rgba(16,185,129,0.15)" : "rgba(251,191,36,0.15)"); color: @(isLive ? "var(--accent-green)" : "#fbbf24"); padding: 2px 8px; border-radius: 10px;">
+                                <i class="ph-bold @(isLive ? "ph-broadcast" : "ph-flask")" style="margin-right: 3px;"></i>@_result.DataSource
+                            </span>
+                        }
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        @if (_selectedPatterns.Any())
+                        {
+                            <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 10px;" @onclick="ClearPatternSelection">
+                                <i class="ph ph-x" style="margin-right: 3px;"></i>Clear
+                            </button>
+                        }
+                        <span style="font-size: 0.65rem; color: var(--text-muted);">
+                            @if (_selectedPatterns.Any())
+                            {
+                                <span>@_selectedPatterns.Count selected</span>
+                            }
+                            else
+                            {
+
+                                <span>Click patterns to highlight</span>
+                            }
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Split: Pattern Selector Panel + Chart -->
+                <div style="display: grid; grid-template-columns: 220px 1fr; min-height: 480px;">
+                    <!-- Pattern Selector Panel -->
+                    <div style="border-right: 1px solid var(--border); padding: 8px; overflow-y: auto; max-height: 480px; background: rgba(0,0,0,0.15);">
+                        @{
+                            var tfPatternCount = _result.Patterns.Count(p => p.Timeframe == _chartTimeframe);
+                        }
+                        <div style="font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 4px 8px; margin-bottom: 4px;">
+                            Detected Patterns (@tfPatternCount)
+                        </div>
+                        @if (tfPatternCount == 0)
+                        {
+                            <div style="padding: 24px 12px; text-align: center;">
+                                <i class="ph-duotone ph-magnifying-glass" style="font-size: 1.5rem; color: var(--text-muted); opacity: 0.4;"></i>
+                                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">No patterns detected on @_chartTimeframe</p>
+                            </div>
+                        }
+                        @for (int i = 0; i < _result.Patterns.Count; i++)
+                        {
+                            var idx = i;
+                            var p = _result.Patterns[idx];
+                            if (p.Timeframe != _chartTimeframe) continue;
+                            var isSelected = _selectedPatterns.Contains(idx);
+                            var dirColor = p.Direction == "Bullish" ? "var(--accent-green)" : p.Direction == "Bearish" ? "var(--accent-red)" : "var(--text-muted)";
+                            var bgColor = isSelected ? "rgba(6, 182, 212, 0.15)" : "transparent";
+                            var borderColor = isSelected ? "var(--accent-cyan)" : "transparent";
+
+                            <div @onclick="() => TogglePattern(idx)"
+                                 style="padding: 8px; border-radius: 6px; margin-bottom: 4px; cursor: pointer;
+                                                    background: @bgColor; border: 1px solid @borderColor;
+                                                    transition: all 0.15s ease; @(!p.AIValid ? "opacity: 0.4;" : "")"
+                                 class="pattern-select-item">
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                                    <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-heading);">@p.PatternName</span>
+                                    @if (!string.IsNullOrEmpty(p.AIGrade))
+                                    {
+                                        var gradeCol = p.AIGrade.StartsWith("A") ? "var(--accent-green)" : p.AIGrade.StartsWith("B") ? "var(--accent-amber)" : "var(--accent-red)";
+                                        <span style="font-size: 0.55rem; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); color: @gradeCol; font-weight: 700;">@p.AIGrade</span>
+                                    }
+                                </div>
+
+                                <div style="display: flex; gap: 6px; align-items: center; font-size: 0.6rem;">
+                                    <span style="color: @dirColor; font-weight: 600;">@(p.Direction == "Bullish" ? "▲" : p.Direction == "Bearish" ? "▼" : "●") @p.Direction</span>
+                                    <span style="color: var(--text-muted);">@p.Confidence.ToString("F0")%</span>
+                                    @{
+                                        var tfBg = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "1H" ? "rgba(255,255,255,0.08)" : "rgba(0,200,200,0.15)";
+                                    }
+                                    <span style="padding: 0px 4px; border-radius: 2px; background: @tfBg;">@p.Timeframe</span>
+                                </div>
+
+                                @if (isSelected)
+                                {
+                                    <div style="display: flex; gap: 8px; margin-top: 4px; font-size: 0.55rem; font-family: 'JetBrains Mono', monospace;">
+                                        <span style="color: #3b82f6;">E: @p.SuggestedEntry.ToString("F2")</span>
+                                        <span style="color: #ef4444;">S: @p.SuggestedStop.ToString("F2")</span>
+                                        <span style="color: #10b981;">T: @p.SuggestedTarget.ToString("F2")</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Chart -->
+                    <div id="patternChartContainer" style="width: 100%; height: 480px;"></div>
+                </div>
+
+                <!-- Legend -->
+                <div style="display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 0.65rem; color: var(--text-muted);">
+                    <span><span style="display:inline-block; width:12px; height:12px; background:#06b6d4; border-radius:2px; margin-right:4px; vertical-align:middle;"></span>Pattern Candles</span>
+                    <span><span style="display:inline-block; width:12px; height:2px; background:#3b82f6; margin-right:4px; vertical-align:middle;"></span>Entry</span>
+                    <span><span style="display:inline-block; width:12px; height:2px; background:#ef4444; margin-right:4px; vertical-align:middle;"></span>Stop</span>
+                    <span><span style="display:inline-block; width:12px; height:2px; background:#10b981; margin-right:4px; vertical-align:middle;"></span>Target</span>
+                    <span><span style="display:inline-block; width:12px; height:2px; background:rgba(16,185,129,0.25); margin-right:4px; vertical-align:middle; border-top:1px dashed rgba(16,185,129,0.4);"></span>Support/Resistance</span>
+                </div>
+            </div>
+        }
+
+        <!-- ═══ PATTERN CARDS ═══ -->
+        @if (_result.Patterns.Any(p => p.Timeframe == _chartTimeframe))
+        {
+            var tfFiltered = _result.Patterns.Where(p => p.Timeframe == _chartTimeframe).ToList();
             <div class="stats-row" style="margin-bottom: 20px;">
                 <div class="stat-card">
                     <div class="stat-label"><i class="ph-light ph-trend-up" style="margin-right: 4px;"></i>Bullish</div>
-                    <div class="stat-value positive">@_result.Patterns.Count(p => p.Direction == "Bullish")</div>
+                    <div class="stat-value positive">@tfFiltered.Count(p => p.Direction == "Bullish")</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label"><i class="ph-light ph-trend-down" style="margin-right: 4px;"></i>Bearish</div>
-                    <div class="stat-value negative">@_result.Patterns.Count(p => p.Direction == "Bearish")</div>
+                    <div class="stat-value negative">@tfFiltered.Count(p => p.Direction == "Bearish")</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label"><i class="ph-light ph-minus" style="margin-right: 4px;"></i>Neutral</div>
-                    <div class="stat-value">@_result.Patterns.Count(p => p.Direction == "Neutral")</div>
+                    <div class="stat-value">@tfFiltered.Count(p => p.Direction == "Neutral")</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label"><i class="ph-light ph-star" style="margin-right: 4px;"></i>Avg Confidence</div>
-                    <div class="stat-value" style="color: var(--accent-cyan);">@(_result.Patterns.Average(p => p.Confidence).ToString("F0"))%</div>
+                    <div class="stat-value" style="color: var(--accent-cyan);">@(tfFiltered.Average(p => p.Confidence).ToString("F0"))%</div>
                 </div>
             </div>
 
             <div class="pattern-grid">
-                @foreach (var p in _result.Patterns)
+                @foreach (var p in tfFiltered)
                 {
                     var dirColor = p.Direction switch
                     {
@@ -422,7 +558,7 @@
                                         "C" => "var(--accent-amber)",
                         _ => "var(--accent-red)"
                     };
-                    var tfBadgeBg = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "4H" ? "rgba(255,255,255,0.08)" : "rgba(0,200,200,0.15)";
+                    var tfBadgeBg = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "1H" ? "rgba(255,255,255,0.08)" : "rgba(0,200,200,0.15)";
 
                     <div class="card pattern-card" style="border-left: 3px solid @dirColor; @(!p.AIValid ? "opacity: 0.5;" : "")">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
@@ -501,7 +637,7 @@
         <div class="card" style="text-align: center; padding: 48px;">
             <i class="ph-thin ph-crosshair" style="font-size: 3rem; color: var(--text-muted);"></i>
             <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Enter a symbol and scan for patterns.</p>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Scans 4H, Daily, and Weekly timeframes simultaneously. AI synthesizes patterns with weighted regime detection and context layers.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Scans 1H, 4H, Daily, and Weekly timeframes simultaneously. AI synthesizes patterns with weighted regime detection and context layers.</p>
         </div>
     }
 </div>
@@ -516,16 +652,38 @@
     private bool _showDetail;
     private string? _error;
     private ScanResultData? _result;
+    private string _chartTimeframe = "Daily";
     private bool _loaded;
+    private bool _chartPending;
+    private HashSet<int> _selectedPatterns = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || _loaded) return;
-        _loaded = true;
+        if (!firstRender && !_chartPending) return;
 
-        var state = await AuthState.GetAuthenticationStateAsync();
-        if (!state.User.Identity?.IsAuthenticated ?? true)
-            Nav.NavigateTo("/login");
+        if (firstRender && !_loaded)
+        {
+            _loaded = true;
+            var state = await AuthState.GetAuthenticationStateAsync();
+            if (!state.User.Identity?.IsAuthenticated ?? true)
+                Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (_chartPending)
+        {
+            _chartPending = false;
+            // Default to first timeframe that actually has patterns
+            if (_result?.Patterns?.Any() == true)
+            {
+                var preferred = new[] { "Daily", "4H", "Weekly", "1H" };
+                _chartTimeframe = preferred.FirstOrDefault(tf => _result.Patterns.Any(p => p.Timeframe == tf)) ?? "Daily";
+            }
+            await RenderPatternChart();
+            AutoSelectMostRecentPattern();
+            await UpdateChartSelection();
+            StateHasChanged();
+        }
     }
 
     private async Task RunScan()
@@ -533,6 +691,8 @@
         _error = null;
         _result = null;
         _showDetail = false;
+        _chartTimeframe = "Daily";
+        _selectedPatterns.Clear();
 
         if (string.IsNullOrWhiteSpace(_symbol))
         {
@@ -562,6 +722,8 @@
         }
 
         _scanning = false;
+        if (_result is not null && _result.ChartCandles.Any())
+            _chartPending = true;
         StateHasChanged();
     }
 
@@ -575,5 +737,139 @@
     {
         if (e.Key == "Enter")
             await RunScan();
+    }
+
+    private async Task TogglePattern(int index)
+    {
+        if (_selectedPatterns.Contains(index))
+            _selectedPatterns.Remove(index);
+        else
+            _selectedPatterns.Add(index);
+
+        await UpdateChartSelection();
+        StateHasChanged();
+    }
+
+    private async Task ClearPatternSelection()
+    {
+        _selectedPatterns.Clear();
+        await JS.InvokeVoidAsync("resetPatternChart");
+        StateHasChanged();
+    }
+
+    private async Task UpdateChartSelection()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("updatePatternSelection", _selectedPatterns.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Chart selection error: {ex.Message}");
+        }
+    }
+
+    private async Task SwitchChartTimeframe(string tf)
+    {
+        if (_chartTimeframe == tf || _result is null) return;
+        _chartTimeframe = tf;
+        _selectedPatterns.Clear();
+        StateHasChanged();
+        await RenderPatternChart();
+        AutoSelectMostRecentPattern();
+        await UpdateChartSelection();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Auto-highlight the most recent pattern for the active chart timeframe.
+    /// This gives immediate visual feedback — the freshest signal is always shown.
+    /// </summary>
+    private void AutoSelectMostRecentPattern()
+    {
+        if (_result is null) return;
+
+        // Find the pattern matching the current timeframe with the latest end date
+        int bestIndex = -1;
+        DateTime bestDate = DateTime.MinValue;
+
+        for (int i = 0; i < _result.Patterns.Count; i++)
+        {
+            var p = _result.Patterns[i];
+            if (p.Timeframe == _chartTimeframe && p.EndDate > bestDate)
+            {
+                bestDate = p.EndDate;
+                bestIndex = i;
+            }
+        }
+
+        _selectedPatterns.Clear();
+        if (bestIndex >= 0)
+            _selectedPatterns.Add(bestIndex);
+    }
+
+    private async Task RenderPatternChart()
+    {
+        if (_result is null || !_result.ChartCandles.Any()) return;
+
+        // Select candles based on active timeframe
+        var activeCandles = _chartTimeframe switch
+        {
+            "1H" => _result.ChartCandles1H?.Any() == true ? _result.ChartCandles1H : _result.ChartCandles,
+            "4H" => _result.ChartCandles4H?.Any() == true ? _result.ChartCandles4H : _result.ChartCandles,
+            "Weekly" => _result.ChartCandlesWeekly?.Any() == true ? _result.ChartCandlesWeekly : _result.ChartCandles,
+            _ => _result.ChartCandles
+        };
+
+        try
+        {
+            var candleData = activeCandles.Select(c => new
+            {
+                time = c.Time,
+                open = (double)c.Open,
+                high = (double)c.High,
+                low = (double)c.Low,
+                close = (double)c.Close
+            }).ToArray();
+
+            var volumeData = activeCandles.Select(c => new
+            {
+                time = c.Time,
+                value = (double)c.Volume,
+                color = c.Close >= c.Open ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"
+            }).ToArray();
+
+            // Build pattern data — filter to selected timeframe for cleaner chart overlay
+            var patternsForChart = _result.Patterns
+                .Where(p => p.Timeframe == _chartTimeframe)
+                .ToList();
+
+            var patterns = patternsForChart.Select(p => new
+            {
+                startTime = new DateTimeOffset(p.StartDate).ToUnixTimeSeconds(),
+                endTime = new DateTimeOffset(p.EndDate).ToUnixTimeSeconds(),
+                direction = p.Direction,
+                timeframe = p.Timeframe,
+                label = $"{p.PatternName} ({p.Confidence:F0}%)",
+                patternName = p.PatternName,
+                grade = p.AIGrade ?? "",
+                entry = (double)p.SuggestedEntry,
+                stop = (double)p.SuggestedStop,
+                target = (double)p.SuggestedTarget,
+                candleCount = p.EndCandleIndex - p.StartCandleIndex + 1
+            }).ToArray();
+
+            var keyLevels = _result.Context?.KeyLevels?.Select(l => new
+            {
+                price = (double)l.Price,
+                type = l.Type
+            }).ToArray() ?? Array.Empty<object>();
+
+            await JS.InvokeVoidAsync("createPatternChart", "patternChartContainer", candleData, volumeData, patterns, keyLevels);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Chart render error: {ex.Message}");
+        }
     }
 }

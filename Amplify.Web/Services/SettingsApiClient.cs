@@ -65,6 +65,31 @@ public class SettingsApiClient
         if (!response.IsSuccessStatusCode) return null;
         return await response.Content.ReadFromJsonAsync<RiskConfigData>();
     }
+
+    // Portfolio Balance
+    public async Task<PortfolioBalanceData?> GetPortfolioBalanceAsync()
+    {
+        AttachToken();
+        var response = await _http.GetAsync("api/Settings/portfolio-balance");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<PortfolioBalanceData>();
+    }
+
+    public async Task<bool> UpdateStartingCapitalAsync(decimal amount)
+    {
+        AttachToken();
+        var response = await _http.PutAsJsonAsync("api/Settings/portfolio-balance",
+            new { StartingCapital = amount });
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> UpdateAiBudgetAsync(decimal percent)
+    {
+        AttachToken();
+        var response = await _http.PutAsJsonAsync("api/Settings/ai-budget",
+            new { AiTradingBudgetPercent = percent });
+        return response.IsSuccessStatusCode;
+    }
 }
 
 public class ProfileData
@@ -91,4 +116,19 @@ public class RiskConfigData
     public double MaxRiskPercent { get; set; }
     public int MaxPositionSize { get; set; }
     public int DefaultPortfolioSize { get; set; }
+}
+
+public class PortfolioBalanceData
+{
+    public decimal StartingCapital { get; set; }
+    public decimal RealizedPnL { get; set; }
+    public decimal UnrealizedPnL { get; set; }
+    public decimal PortfolioValue { get; set; }
+    public decimal TotalInvested { get; set; }
+    public decimal CashAvailable { get; set; }
+    public int OpenPositionCount { get; set; }
+    public decimal AiTradingBudgetPercent { get; set; }
+    public decimal AiTradingBudgetDollars { get; set; }
+    public decimal AiCashUsed { get; set; }
+    public decimal AiCashRemaining { get; set; }
 }

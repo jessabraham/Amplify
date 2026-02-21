@@ -56,6 +56,7 @@ public class ScanResultData
     public string Symbol { get; set; } = "";
     public int TotalPatterns { get; set; }
     public decimal CurrentPrice { get; set; }
+    public string DataSource { get; set; } = ""; // "Alpaca" or "Sample Data"
 
     // Multi-timeframe
     public string CombinedRegime { get; set; } = "";
@@ -67,10 +68,27 @@ public class ScanResultData
 
     // Context layers
     public ContextData? Context { get; set; }
+    public List<ContextData> TimeframeContexts { get; set; } = new();
 
     // Patterns + AI
     public List<ScannedPatternDto> Patterns { get; set; } = new();
     public AIAnalysisData? AIAnalysis { get; set; }
+
+    // Chart data — all three timeframes
+    public List<ChartCandleDto> ChartCandles { get; set; } = new();
+    public List<ChartCandleDto> ChartCandles1H { get; set; } = new();
+    public List<ChartCandleDto> ChartCandles4H { get; set; } = new();
+    public List<ChartCandleDto> ChartCandlesWeekly { get; set; } = new();
+}
+
+public class ChartCandleDto
+{
+    public long Time { get; set; }
+    public decimal Open { get; set; }
+    public decimal High { get; set; }
+    public decimal Low { get; set; }
+    public decimal Close { get; set; }
+    public long Volume { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -96,6 +114,7 @@ public class TimeframeSummaryData
 
 public class ContextData
 {
+    public string Timeframe { get; set; } = "Daily";
     public decimal VolumeRatio { get; set; }
     public string VolumeProfile { get; set; } = "";
     public decimal? NearestSupport { get; set; }
@@ -140,6 +159,8 @@ public class ScannedPatternDto
     public decimal SuggestedTarget { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
+    public int StartCandleIndex { get; set; }
+    public int EndCandleIndex { get; set; }
     // AI fields
     public string AIGrade { get; set; } = "";
     public bool AIValid { get; set; } = true;

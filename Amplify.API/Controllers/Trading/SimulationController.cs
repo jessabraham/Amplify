@@ -150,6 +150,28 @@ public class SimulationController : ControllerBase
         var all = await _simulation.GetUserStatsAsync(userId);
         return Ok(new { UserStats = all, PatternPerformance = perfs });
     }
+    /// <summary>
+    /// Delete a simulated trade (active or resolved).
+    /// </summary>
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteTrade(Guid id)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var deleted = await _simulation.DeleteTradeAsync(id, userId);
+        if (!deleted) return NotFound("Trade not found or not owned by you");
+        return Ok(new { deleted = true, id });
+    }
+
+    /// <summary>
+    /// Delete all simulated trades for the current user.
+    /// </summary>
+    [HttpDelete("clear-all")]
+    public async Task<IActionResult> ClearAll()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var count = await _simulation.ClearAllTradesAsync(userId);
+        return Ok(new { deleted = count });
+    }
 }
 
 public class CreateSimTradeRequest

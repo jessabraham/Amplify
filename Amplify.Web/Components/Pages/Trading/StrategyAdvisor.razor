@@ -1,0 +1,399 @@
+﻿@page "/strategy-advisor"
+@using Amplify.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AdvisoryApiClient AdvisoryApi
+@inject AuthenticationStateProvider AuthState
+
+<div style="max-width: 1100px; margin: 0 auto; padding: 24px;">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+        <div>
+            <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--text-heading); margin: 0;">
+                <i class="ph-duotone ph-brain" style="margin-right: 8px; color: var(--accent-cyan);"></i>Strategy Advisor
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">
+                AI-powered analysis of your trading performance with actionable recommendations
+            </p>
+        </div>
+    </div>
+
+    <!-- Focus Area Selection -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px; font-size: 0.85rem;">
+            <i class="ph-duotone ph-funnel" style="margin-right: 6px;"></i>Analysis Focus
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+            @foreach (var area in _focusAreas)
+            {
+                var isActive = _selectedFocus == area.Key;
+                <button style="padding: 8px 16px; font-size: 0.78rem; border-radius: 8px;
+                            border: 1px solid @(isActive? area.Color: "var(--border)");
+                            background: @(isActive ? $"rgba({area.Rgb}, 0.12)" : "transparent");
+                            color: @(isActive? area.Color: "var(--text-muted)");
+                            cursor: pointer; font-weight: @(isActive ? "700" : "500");
+                            transition: all 0.2s; display: flex; align-items: center; gap: 6px;"
+                        @onclick="() => _selectedFocus = area.Key">
+                    <i class="@area.Icon" style="font-size: 0.9rem;"></i>
+                    @area.Label
+                </button>
+            }
+        </div>
+
+        <button style="padding: 10px 24px; background: var(--accent-cyan); color: var(--bg-primary);
+                border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;
+                display: flex; align-items: center; gap: 8px; transition: all 0.2s;
+                opacity: @(_analyzing ? "0.6" : "1");"
+                @onclick="RunAnalysis" disabled="@_analyzing">
+            @if (_analyzing)
+            {
+                <i class="ph-duotone ph-spinner" style="animation: spin 1s linear infinite;"></i>
+                <span>Analyzing your trading history...</span>
+            }
+            else
+            {
+                <i class="ph-duotone ph-lightning"></i>
+                <span>Generate Strategy Analysis</span>
+            }
+        </button>
+    </div>
+
+    <!-- Stats Summary (shows after analysis) -->
+    @if (_result is not null)
+    {
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+            <!-- Win Rate -->
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Win Rate</div>
+                <div style="font-size: 1.4rem; font-weight: 700; color: @(GetWinRateColor(_result.OverallWinRate)); margin-top: 4px;">@(_result.OverallWinRate.ToString("F1"))%</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);">@_result.TradesAnalyzed trades analyzed</div>
+            </div>
+            <!-- Avg R -->
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Avg R-Multiple</div>
+                <div style="font-size: 1.4rem; font-weight: 700; color: @(GetRMultipleColor(_result.AvgRMultiple)); margin-top: 4px;">@(_result.AvgRMultiple.ToString("F2"))R</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);">@_result.PatternsAnalyzed patterns tracked</div>
+            </div>
+            <!-- Best/Worst TF -->
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Best Timeframe</div>
+                <div style="font-size: 1.4rem; font-weight: 700; color: var(--accent-green); margin-top: 4px;">@_result.BestTimeframe</div>
+                <div style="font-size: 0.7rem; color: var(--accent-red);">Worst: @_result.WorstTimeframe</div>
+            </div>
+            <!-- Best/Worst Regime -->
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Best Regime</div>
+                <div style="font-size: 1.4rem; font-weight: 700; color: var(--accent-green); margin-top: 4px;">@_result.BestRegime</div>
+                <div style="font-size: 0.7rem; color: var(--accent-red);">Worst: @_result.WorstRegime</div>
+            </div>
+        </div>
+
+        <!-- AI Analysis Content -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div style="font-weight: 600; color: var(--text-heading); font-size: 0.9rem;">
+                    <i class="ph-duotone ph-sparkle" style="margin-right: 6px; color: var(--accent-cyan);"></i>AI Strategy Recommendations
+                </div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);">
+                    Generated @_result.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy h:mm tt")
+                </div>
+            </div>
+
+            <!-- Section Tabs -->
+            <div style="display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;">
+                @foreach (var section in _sections)
+                {
+                    var isActive = _activeSection == section.Key;
+                    <button style="padding: 6px 14px; font-size: 0.75rem; border-radius: 6px;
+                                    border: 1px solid @(isActive? section.Color: "var(--border)");
+                                    background: @(isActive ? "rgba(255,255,255,0.08)" : "transparent");
+                                    color: @(isActive? section.Color: "var(--text-muted)");
+                                    cursor: pointer; font-weight: @(isActive ? "700" : "500");
+                                    transition: all 0.2s; display: flex; align-items: center; gap: 5px;"
+                            @onclick="() => _activeSection = section.Key">
+                        <i class="@(section.Icon)" style="font-size: 0.8rem;"></i>
+                        @(section.Label)
+                    </button>
+                }
+            </div>
+
+            <!-- Rendered Analysis -->
+            <div class="ai-analysis-content" style="font-size: 0.82rem; line-height: 1.7; color: var(--text-body);">
+                @((MarkupString)GetFilteredAnalysis())
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button style="padding: 8px 16px; background: transparent; color: var(--text-muted);
+                        border: 1px solid var(--border); border-radius: 8px; font-size: 0.78rem;
+                        cursor: pointer; display: flex; align-items: center; gap: 6px;"
+                    @onclick="RunAnalysis">
+                <i class="ph-duotone ph-arrows-clockwise"></i>
+                Re-analyze
+            </button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="card" style="border-color: var(--accent-red); margin-top: 12px;">
+            <div style="color: var(--accent-red); font-size: 0.85rem;">
+                <i class="ph-duotone ph-warning" style="margin-right: 6px;"></i>@_error
+            </div>
+        </div>
+    }
+
+    @if (!_analyzing && _result is null && string.IsNullOrEmpty(_error))
+    {
+        <!-- Empty State -->
+        <div class="card" style="text-align: center; padding: 48px 24px;">
+            <i class="ph-duotone ph-brain" style="font-size: 3rem; color: var(--accent-cyan); opacity: 0.4; display: block; margin-bottom: 16px;"></i>
+            <div style="color: var(--text-heading); font-weight: 600; margin-bottom: 8px;">Your AI Trading Coach</div>
+            <div style="color: var(--text-muted); font-size: 0.82rem; max-width: 500px; margin: 0 auto; line-height: 1.6;">
+                The Strategy Advisor analyzes your complete trading history — patterns, timeframes, regimes,
+                win rates, and R-multiples — then provides specific recommendations to improve your results.
+                <br><br>
+                <span style="color: var(--text-body);">Select a focus area and click Generate to get started.</span>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .ai-analysis-content h2 {
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--text-heading);
+        margin-top: 20px;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .ai-analysis-content h3 {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        margin-top: 14px;
+        margin-bottom: 6px;
+    }
+
+    .ai-analysis-content strong {
+        color: var(--text-heading);
+    }
+
+    .ai-analysis-content ul, .ai-analysis-content ol {
+        padding-left: 20px;
+        margin: 8px 0;
+    }
+
+    .ai-analysis-content li {
+        margin-bottom: 4px;
+    }
+
+    .ai-analysis-content code {
+        background: rgba(255,255,255,0.06);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        color: var(--accent-amber);
+    }
+
+    .ai-analysis-content p {
+        margin: 6px 0;
+    }
+
+    @@keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+@code {
+    private bool _analyzing = false;
+    private string _error = "";
+    private string _selectedFocus = "All";
+    private string _activeSection = "All";
+    private StrategyAnalysisResponse? _result;
+    private string _rawAnalysis = "";
+
+    private readonly List<FocusAreaItem> _focusAreas = new()
+    {
+        new("All", "Full Analysis", "ph-duotone ph-globe", "var(--accent-cyan)", "6,182,212"),
+        new("Performance", "Performance Feedback", "ph-duotone ph-chart-line-up", "var(--accent-green)", "16,185,129"),
+        new("Strategy", "Strategy Tuning", "ph-duotone ph-sliders-horizontal", "var(--accent-amber)", "245,158,11"),
+        new("Indicators", "New Indicators", "ph-duotone ph-chart-bar", "rgba(123,97,255,0.9)", "123,97,255"),
+        new("DataSources", "Data Sources", "ph-duotone ph-database", "var(--accent-red)", "239,68,68")
+    };
+
+    private readonly List<SectionItem> _sections = new()
+    {
+        new("All", "All Sections", "ph-duotone ph-list", "var(--text-heading)"),
+        new("Performance", "Performance", "ph-duotone ph-chart-line-up", "var(--accent-green)"),
+        new("Strategy", "Strategy", "ph-duotone ph-sliders-horizontal", "var(--accent-amber)"),
+        new("Indicators", "Indicators", "ph-duotone ph-chart-bar", "rgba(123,97,255,0.9)"),
+        new("DataSources", "Data Sources", "ph-duotone ph-database", "var(--accent-red)")
+    };
+
+    private async Task RunAnalysis()
+    {
+        _analyzing = true;
+        _error = "";
+        _result = null;
+        _rawAnalysis = "";
+        StateHasChanged();
+
+        try
+        {
+            var focus = _selectedFocus == "All" ? null : _selectedFocus;
+            _result = await AdvisoryApi.GetStrategyAnalysisAsync(focus);
+
+            if (_result is null)
+            {
+                _error = "Failed to get analysis. Make sure Ollama is running and you have trading history.";
+            }
+            else
+            {
+                _rawAnalysis = _result.Analysis;
+                _activeSection = "All";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Analysis failed: {ex.Message}";
+        }
+        finally
+        {
+            _analyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetFilteredAnalysis()
+    {
+        if (string.IsNullOrEmpty(_rawAnalysis)) return "";
+
+        var html = ConvertMarkdownToHtml(_rawAnalysis);
+
+        if (_activeSection == "All") return html;
+
+        // Extract just the relevant section
+        var sectionHeaders = new Dictionary<string, string>
+        {
+            ["Performance"] = "Performance Feedback",
+            ["Strategy"] = "Strategy Tuning",
+            ["Indicators"] = "New Indicators",
+            ["DataSources"] = "Data Source"
+        };
+
+        if (!sectionHeaders.TryGetValue(_activeSection, out var header)) return html;
+
+        var headerTag = $"<h2>";
+        var sections = html.Split(headerTag);
+
+        foreach (var section in sections)
+        {
+            if (section.Contains(header, StringComparison.OrdinalIgnoreCase))
+            {
+                return headerTag + section.Split("<h2>")[0]; // Take until next h2
+            }
+        }
+
+        return html; // Fallback to showing all
+    }
+
+    private string ConvertMarkdownToHtml(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown)) return "";
+
+        var lines = markdown.Split('\n');
+        var sb = new System.Text.StringBuilder();
+        var inList = false;
+        var inOrderedList = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd();
+
+            // Headers
+            if (line.StartsWith("## "))
+            {
+                CloseList(sb, ref inList, ref inOrderedList);
+                sb.AppendLine($"<h2>{ProcessInline(line[3..])}</h2>");
+                continue;
+            }
+            if (line.StartsWith("### "))
+            {
+                CloseList(sb, ref inList, ref inOrderedList);
+                sb.AppendLine($"<h3>{ProcessInline(line[4..])}</h3>");
+                continue;
+            }
+
+            // Unordered list
+            if (line.TrimStart().StartsWith("- ") || line.TrimStart().StartsWith("* "))
+            {
+                if (inOrderedList) { sb.AppendLine("</ol>"); inOrderedList = false; }
+                if (!inList) { sb.AppendLine("<ul>"); inList = true; }
+                var indent = line.Length - line.TrimStart().Length;
+                var content = line.TrimStart()[2..];
+                sb.AppendLine($"<li>{ProcessInline(content)}</li>");
+                continue;
+            }
+
+            // Ordered list
+            if (line.TrimStart().Length > 2 && char.IsDigit(line.TrimStart()[0]) && line.TrimStart()[1] == '.')
+            {
+                if (inList) { sb.AppendLine("</ul>"); inList = false; }
+                if (!inOrderedList) { sb.AppendLine("<ol>"); inOrderedList = true; }
+                var content = line.TrimStart()[2..].TrimStart();
+                sb.AppendLine($"<li>{ProcessInline(content)}</li>");
+                continue;
+            }
+
+            // Empty line
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                CloseList(sb, ref inList, ref inOrderedList);
+                continue;
+            }
+
+            // Regular paragraph
+            CloseList(sb, ref inList, ref inOrderedList);
+            sb.AppendLine($"<p>{ProcessInline(line)}</p>");
+        }
+
+        CloseList(sb, ref inList, ref inOrderedList);
+        return sb.ToString();
+    }
+
+    private void CloseList(System.Text.StringBuilder sb, ref bool inList, ref bool inOrderedList)
+    {
+        if (inList) { sb.AppendLine("</ul>"); inList = false; }
+        if (inOrderedList) { sb.AppendLine("</ol>"); inOrderedList = false; }
+    }
+
+    private string ProcessInline(string text)
+    {
+        // Bold
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        // Inline code
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"`(.+?)`", "<code>$1</code>");
+        // Italic
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*(.+?)\*", "<em>$1</em>");
+        return text;
+    }
+
+    private record FocusAreaItem(string Key, string Label, string Icon, string Color, string Rgb);
+    private record SectionItem(string Key, string Label, string Icon, string Color);
+
+    private static string GetWinRateColor(decimal wr) =>
+        wr >= 55 ? "var(--accent-green)" : wr >= 45 ? "var(--accent-amber)" : "var(--accent-red)";
+
+    private static string GetRMultipleColor(decimal r) =>
+        r >= 1 ? "var(--accent-green)" : r >= 0.5m ? "var(--accent-amber)" : "var(--accent-red)";
+}

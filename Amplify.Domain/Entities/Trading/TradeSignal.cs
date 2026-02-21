@@ -16,6 +16,15 @@ public class TradeSignal : IEntity
     public SignalType SignalType { get; set; }
     public MarketRegime Regime { get; set; }
 
+    // Source & Status
+    public SignalSource Source { get; set; } = SignalSource.Manual;
+    public SignalStatus Status { get; set; } = SignalStatus.Pending;
+
+    // Pattern context (from scanner)
+    public string? PatternName { get; set; }
+    public string? PatternTimeframe { get; set; }
+    public decimal? PatternConfidence { get; set; }
+
     // Scoring & risk
     public decimal SetupScore { get; set; }
     public decimal EntryPrice { get; set; }
@@ -41,9 +50,11 @@ public class TradeSignal : IEntity
     public decimal? RiskPortfolioSize { get; set; }
     public string? RiskWarnings { get; set; }
 
-    // Status
+    // Status tracking
     public bool IsActive { get; set; } = true;
     public DateTime? ArchivedAt { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public DateTime? RejectedAt { get; set; }
 
     // Relationships
     public string UserId { get; set; } = string.Empty;

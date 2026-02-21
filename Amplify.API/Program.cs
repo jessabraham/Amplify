@@ -92,7 +92,7 @@ using (var scope = app.Services.CreateScope())
     {
         await RoleSeeder.SeedRolesAsync(scope.ServiceProvider);
         await AdminSeeder.SeedAdminAsync(scope.ServiceProvider);
-        await SimulationSeeder.SeedDemoTradesAsync(scope.ServiceProvider);
+        // SimulationSeeder removed — real trades are created by BackgroundPatternScannerService
         Console.WriteLine("Seeding complete!");
     }
     catch (Exception ex)

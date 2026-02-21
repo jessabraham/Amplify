@@ -77,17 +77,17 @@ public class PatternDetector : IPatternDetector
                 });
             }
 
-            // Inverted Hammer (bullish reversal)
+            // Inverted Hammer (Bulkowski: bearish CONTINUATION 65% — theory says bullish, data says otherwise)
             if (c.UpperWick >= c.Body * 2 && c.LowerWick < c.Body * 0.5m && c.Range > avgRange * 0.5m && prev.IsBearish)
             {
                 results.Add(new PatternResult
                 {
                     PatternType = PatternType.InvertedHammer,
                     PatternName = "Inverted Hammer",
-                    Direction = PatternDirection.Bullish,
-                    Confidence = 60 + Math.Min(c.UpperWick / c.Body * 5, 20),
-                    HistoricalWinRate = 55,
-                    Description = "Long upper wick with small body at bottom after a downtrend. Potential bullish reversal.",
+                    Direction = PatternDirection.Bearish, // Bulkowski: bearish continuation 65%
+                    Confidence = 55 + Math.Min(c.UpperWick / c.Body * 3, 15),
+                    HistoricalWinRate = 65,
+                    Description = "Long upper wick after downtrend. Textbooks say bullish BUT Bulkowski found bearish continuation 65%. Performance rank 6/103 though — strong moves when breakout occurs. Wait for confirmation.",
                     StartIndex = i,
                     EndIndex = i,
                     StartDate = c.Time,
@@ -128,7 +128,7 @@ public class PatternDetector : IPatternDetector
                     PatternName = c.IsBullish ? "Bullish Marubozu" : "Bearish Marubozu",
                     Direction = c.IsBullish ? PatternDirection.Bullish : PatternDirection.Bearish,
                     Confidence = 75,
-                    HistoricalWinRate = 62,
+                    HistoricalWinRate = 56,
                     Description = $"Full-body candle with no wicks — strong {(c.IsBullish ? "buying" : "selling")} momentum. Trend continuation likely.",
                     StartIndex = i,
                     EndIndex = i,
@@ -137,6 +137,174 @@ public class PatternDetector : IPatternDetector
                     SuggestedEntry = c.Close,
                     SuggestedStop = c.IsBullish ? c.Low : c.High,
                     SuggestedTarget = c.IsBullish ? c.Close + c.Body : c.Close - c.Body
+                });
+            }
+
+            // Hanging Man (bearish reversal — same shape as Hammer but in uptrend)
+            if (c.LowerWick >= c.Body * 2 && c.UpperWick < c.Body * 0.5m && c.Range > avgRange * 0.5m && prev.IsBullish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.HangingMan,
+                    PatternName = "Hanging Man",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 55 + Math.Min(c.LowerWick / c.Body * 3, 15),
+                    HistoricalWinRate = 59,
+                    Description = "Hammer shape in uptrend — bearish reversal warning. Bulkowski: acts as continuation 59% of time, use with caution.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Low,
+                    SuggestedStop = c.High,
+                    SuggestedTarget = c.Low - (c.High - c.Low)
+                });
+            }
+
+            // Dragonfly Doji (bullish at bottom)
+            if (c.IsDoji && c.LowerWick > avgRange * 0.5m && c.UpperWick < c.Range * 0.1m && prev.IsBearish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.DragonflyDoji,
+                    PatternName = "Dragonfly Doji",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 65,
+                    HistoricalWinRate = 57,
+                    Description = "Doji with long lower shadow and no upper shadow after downtrend. Bullish reversal signal — buyers rejected the low.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.High,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = c.High + (c.High - c.Low)
+                });
+            }
+
+            // Gravestone Doji (bearish at top)
+            if (c.IsDoji && c.UpperWick > avgRange * 0.5m && c.LowerWick < c.Range * 0.1m && prev.IsBullish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.GravestoneDoji,
+                    PatternName = "Gravestone Doji",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 65,
+                    HistoricalWinRate = 53,
+                    Description = "Doji with long upper shadow and no lower shadow after uptrend. Bearish reversal signal — sellers rejected the high.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Low,
+                    SuggestedStop = c.High,
+                    SuggestedTarget = c.Low - (c.High - c.Low)
+                });
+            }
+
+            // Long-Legged Doji (strong indecision)
+            if (c.IsDoji && c.UpperWick > avgRange * 0.4m && c.LowerWick > avgRange * 0.4m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.LongLeggedDoji,
+                    PatternName = "Long-Legged Doji",
+                    Direction = PatternDirection.Neutral,
+                    Confidence = 60,
+                    HistoricalWinRate = 50,
+                    Description = "Doji with very long shadows both sides. Extreme indecision — potential reversal at key levels. Bulkowski rank 38/103.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = c.Close + c.Range
+                });
+            }
+
+            // High Wave (extreme indecision — very long shadows, tiny body)
+            if (c.Body < c.Range * 0.15m && c.UpperWick > avgRange * 0.6m && c.LowerWick > avgRange * 0.6m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.HighWave,
+                    PatternName = "High Wave",
+                    Direction = PatternDirection.Neutral,
+                    Confidence = 55,
+                    HistoricalWinRate = 50,
+                    Description = "Tiny body with extremely long shadows. Wild indecision — potential reversal at key levels. Bulkowski: essentially random direction.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = c.Close + c.Range
+                });
+            }
+
+            // Takuri Line (strong bullish reversal — like Hammer with longer wick)
+            if (c.LowerWick >= c.Body * 3 && c.UpperWick < c.Body * 0.3m && c.Range > avgRange * 0.5m && prev.IsBearish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.TakuriLine,
+                    PatternName = "Takuri Line",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 70 + Math.Min(c.LowerWick / c.Body * 3, 15),
+                    HistoricalWinRate = 66,
+                    Description = "Like Hammer but with even longer lower shadow (>3x body). Bulkowski: reversal 66%, rank 18/103. Best as retrace in uptrend.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.High,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = c.High + (c.High - c.Low)
+                });
+            }
+
+            // Bullish Belt Hold (opens at low, no lower shadow, long white body)
+            if (c.IsBullish && c.LowerWick < c.Range * 0.02m && c.Body > avgRange * 0.6m && prev.IsBearish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BeltHoldBullish,
+                    PatternName = "Bullish Belt Hold",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 55,
+                    HistoricalWinRate = 52,
+                    Description = "Opens at its low with no lower shadow. Bulkowski: continuation 52% (near random). Weak signal.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = c.Close + c.Body
+                });
+            }
+
+            // Bearish Belt Hold (opens at high, no upper shadow, long black body)
+            if (c.IsBearish && c.UpperWick < c.Range * 0.02m && c.Body > avgRange * 0.6m && prev.IsBullish)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BeltHoldBearish,
+                    PatternName = "Bearish Belt Hold",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 55,
+                    HistoricalWinRate = 52,
+                    Description = "Opens at its high with no upper shadow. Bulkowski: near random. Weak signal alone.",
+                    StartIndex = i,
+                    EndIndex = i,
+                    StartDate = c.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.High,
+                    SuggestedTarget = c.Close - c.Body
                 });
             }
 
@@ -192,9 +360,9 @@ public class PatternDetector : IPatternDetector
                     PatternType = PatternType.BullishHarami,
                     PatternName = "Bullish Harami",
                     Direction = PatternDirection.Bullish,
-                    Confidence = 60,
+                    Confidence = 50,
                     HistoricalWinRate = 53,
-                    Description = "Small green candle inside prior large red candle. Selling pressure is weakening — potential bullish reversal.",
+                    Description = "Small green candle inside prior large red body. Bulkowski: reversal only 53% (near random). Rank 38/103. Much better as Three Inside Up (with confirmation candle).",
                     StartIndex = i - 1,
                     EndIndex = i,
                     StartDate = prev.Time,
@@ -213,9 +381,9 @@ public class PatternDetector : IPatternDetector
                     PatternType = PatternType.BearishHarami,
                     PatternName = "Bearish Harami",
                     Direction = PatternDirection.Bearish,
-                    Confidence = 60,
+                    Confidence = 50,
                     HistoricalWinRate = 53,
-                    Description = "Small red candle inside prior large green candle. Buying pressure weakening — potential bearish reversal.",
+                    Description = "Small red candle inside prior large green body. Bulkowski: reversal only 53% (near random). Much better as Three Inside Down (with confirmation candle).",
                     StartIndex = i - 1,
                     EndIndex = i,
                     StartDate = prev.Time,
@@ -256,8 +424,292 @@ public class PatternDetector : IPatternDetector
                     PatternName = "Dark Cloud Cover",
                     Direction = PatternDirection.Bearish,
                     Confidence = 65,
+                    HistoricalWinRate = 60,
+                    Description = "Opens above prior high, closes below midpoint of prior green candle. Sellers taking control — bearish reversal. Bulkowski: reversal 60%.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.High,
+                    SuggestedTarget = c.Close - prev.Body
+                });
+            }
+
+            // Tweezers Bottom (bullish — matching lows)
+            if (Math.Abs(c.Low - prev.Low) < avgRange * 0.03m && prev.IsBearish && c.IsBullish && c.Body > avgRange * 0.2m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.TweezerBottom,
+                    PatternName = "Tweezers Bottom",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 60,
+                    HistoricalWinRate = 55,
+                    Description = "Two candles with matching lows — support confirmed. Better when combined with other patterns.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.Low - avgRange * 0.1m,
+                    SuggestedTarget = c.Close + (c.Close - c.Low) * 2
+                });
+            }
+
+            // Tweezers Top (bearish — matching highs)
+            if (Math.Abs(c.High - prev.High) < avgRange * 0.03m && prev.IsBullish && c.IsBearish && c.Body > avgRange * 0.2m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.TweezerTop,
+                    PatternName = "Tweezers Top",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 60,
+                    HistoricalWinRate = 55,
+                    Description = "Two candles with matching highs — resistance confirmed. Better when combined with other patterns.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.High + avgRange * 0.1m,
+                    SuggestedTarget = c.Close - (c.High - c.Close) * 2
+                });
+            }
+
+            // Bullish Harami Cross (Harami with Doji second candle)
+            if (prev.IsBearish && c.IsDoji && prev.Body > avgRange * 0.4m
+                && c.High < prev.Open && c.Low > prev.Close)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BullishHaramiCross,
+                    PatternName = "Bullish Harami Cross",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 58,
+                    HistoricalWinRate = 55,
+                    Description = "Doji inside prior bearish body. Slightly better than regular Harami but still near random. Needs confirmation.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = prev.Open,
+                    SuggestedStop = prev.Low,
+                    SuggestedTarget = prev.Open + (prev.Open - prev.Low) * 1.5m
+                });
+            }
+
+            // Bearish Harami Cross
+            if (prev.IsBullish && c.IsDoji && prev.Body > avgRange * 0.4m
+                && c.High < prev.Close && c.Low > prev.Open)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BearishHaramiCross,
+                    PatternName = "Bearish Harami Cross",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 55,
                     HistoricalWinRate = 57,
-                    Description = "Opens above prior high, closes below midpoint of prior green candle. Sellers taking control — bearish reversal.",
+                    Description = "Doji inside prior bullish body. Bulkowski: actually acts as bullish continuation 57%! Theory is wrong. Overall rank 80/103.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = prev.Open,
+                    SuggestedStop = prev.High,
+                    SuggestedTarget = prev.Open - (prev.High - prev.Open) * 1.5m
+                });
+            }
+
+            // Bullish Kicking (black marubozu + gap + white marubozu)
+            if (prev.IsBearish && c.IsBullish
+                && prev.UpperWick < prev.Body * 0.05m && prev.LowerWick < prev.Body * 0.05m
+                && c.UpperWick < c.Body * 0.05m && c.LowerWick < c.Body * 0.05m
+                && c.Open > prev.Open)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BullishKicking,
+                    PatternName = "Bullish Kicking",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 55,
+                    HistoricalWinRate = 53,
+                    Description = "Two marubozu with gap up. Dramatic but Bulkowski: reversal only 53% (random). Rank 100/103 frequency. Don't rely on alone.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = prev.Close,
+                    SuggestedTarget = c.Close + c.Body
+                });
+            }
+
+            // Bearish Kicking
+            if (prev.IsBullish && c.IsBearish
+                && prev.UpperWick < prev.Body * 0.05m && prev.LowerWick < prev.Body * 0.05m
+                && c.UpperWick < c.Body * 0.05m && c.LowerWick < c.Body * 0.05m
+                && c.Open < prev.Open)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BearishKicking,
+                    PatternName = "Bearish Kicking",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 55,
+                    HistoricalWinRate = 53,
+                    Description = "Two marubozu with gap down. Dramatic but near random. Very rare.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = prev.Close,
+                    SuggestedTarget = c.Close - c.Body
+                });
+            }
+
+            // Bullish Meeting Lines (both close at same level)
+            if (prev.IsBearish && c.IsBullish && prev.Body > avgRange * 0.4m && c.Body > avgRange * 0.4m
+                && Math.Abs(prev.Close - c.Close) < avgRange * 0.05m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BullishMeetingLines,
+                    PatternName = "Bullish Meeting Lines",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 55,
+                    HistoricalWinRate = 56,
+                    Description = "Long black then long white, closing at same price. Bulkowski: reversal 56% (near random). Rank 49/103.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = Math.Min(c.Low, prev.Low),
+                    SuggestedTarget = c.Close + c.Body
+                });
+            }
+
+            // Bearish Meeting Lines
+            if (prev.IsBullish && c.IsBearish && prev.Body > avgRange * 0.4m && c.Body > avgRange * 0.4m
+                && Math.Abs(prev.Close - c.Close) < avgRange * 0.05m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BearishMeetingLines,
+                    PatternName = "Bearish Meeting Lines",
+                    Direction = PatternDirection.Neutral, // Random direction per Bulkowski
+                    Confidence = 55,
+                    HistoricalWinRate = 51,
+                    Description = "Long white then long black, closing at same price. Bulkowski: direction random (51% continuation). BUT rank 16/103 performance — strong post-breakout trend. Wait for breakout direction.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = Math.Max(c.High, prev.High),
+                    SuggestedTarget = c.Close - c.Body
+                });
+            }
+
+            // Homing Pigeon (two black candles, second inside first)
+            if (prev.IsBearish && c.IsBearish && c.High < prev.Open && c.Low > prev.Close && c.Body < prev.Body)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.HomingPigeon,
+                    PatternName = "Homing Pigeon",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 55,
+                    HistoricalWinRate = 56,
+                    Description = "Two black candles, second inside first. Similar to bullish harami but both bearish. Bulkowski: reversal 56%, weak.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = prev.Open,
+                    SuggestedStop = prev.Low,
+                    SuggestedTarget = prev.Open + prev.Body * 0.5m
+                });
+            }
+
+            // Matching Low (two black candles closing at same price)
+            if (prev.IsBearish && c.IsBearish && Math.Abs(prev.Close - c.Close) < avgRange * 0.02m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.MatchingLow,
+                    PatternName = "Matching Low",
+                    Direction = PatternDirection.Bearish, // Bulkowski: continuation 61%
+                    Confidence = 55,
+                    HistoricalWinRate = 61,
+                    Description = "Two black candles closing at same price. Bulkowski: BEARISH continuation 61% (theory says bullish). BUT overall rank 8/103 — excellent post-breakout moves. Best on upward breakout.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = c.Close,
+                    SuggestedStop = c.Close + avgRange * 0.5m,
+                    SuggestedTarget = c.Close - c.Body * 2
+                });
+            }
+
+            // Bullish Doji Star (long black + doji gapping below)
+            if (prev.IsBearish && prev.Body > avgRange * 0.4m && c.IsDoji && c.High < prev.Close)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BullishDojiStar,
+                    PatternName = "Bullish Doji Star",
+                    Direction = PatternDirection.Bullish,
+                    Confidence = 55,
+                    HistoricalWinRate = 53,
+                    Description = "Long black candle + Doji gapping below. Bulkowski: reversal 53% (near random). Rank 66/103. Needs confirmation.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = prev.BodyCenter,
+                    SuggestedStop = c.Low,
+                    SuggestedTarget = prev.Open
+                });
+            }
+
+            // Bearish Doji Star (long white + doji gapping above)
+            if (prev.IsBullish && prev.Body > avgRange * 0.4m && c.IsDoji && c.Low > prev.Close)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.BearishDojiStar,
+                    PatternName = "Bearish Doji Star",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 55,
+                    HistoricalWinRate = 51,
+                    Description = "Long white candle + Doji gapping above. Bulkowski: reversal 51% (random). Possible Evening Doji Star precursor — watch C3.",
+                    StartIndex = i - 1,
+                    EndIndex = i,
+                    StartDate = prev.Time,
+                    EndDate = c.Time,
+                    SuggestedEntry = prev.BodyCenter,
+                    SuggestedStop = c.High,
+                    SuggestedTarget = prev.Open
+                });
+            }
+
+            // In Neck (bearish continuation — failed rally)
+            if (prev.IsBearish && c.IsBullish && prev.Body > avgRange * 0.4m
+                && c.Open < prev.Low && Math.Abs(c.Close - prev.Low) < avgRange * 0.05m)
+            {
+                results.Add(new PatternResult
+                {
+                    PatternType = PatternType.InNeck,
+                    PatternName = "In Neck",
+                    Direction = PatternDirection.Bearish,
+                    Confidence = 60,
+                    HistoricalWinRate = 56,
+                    Description = "White candle opens below and closes at the black's low. Failed rally — bears still in control.",
                     StartIndex = i - 1,
                     EndIndex = i,
                     StartDate = prev.Time,
@@ -359,6 +811,375 @@ public class PatternDetector : IPatternDetector
                         SuggestedEntry = c.Close,
                         SuggestedStop = prev2.High,
                         SuggestedTarget = c.Close - (prev2.High - c.Close) * 0.5m
+                    });
+                }
+
+                // Morning Doji Star (stronger than Morning Star)
+                if (prev2.IsBearish && prev.IsDoji && prev.High < prev2.Close && c.IsBullish && c.Close > prev2.BodyCenter)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.MorningDojiStar,
+                        PatternName = "Morning Doji Star",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 80,
+                        HistoricalWinRate = 76,
+                        Description = "Morning Star with Doji center. Stronger than regular Morning Star. Bulkowski: reversal 76%.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.Low,
+                        SuggestedTarget = c.Close + (c.Close - prev.Low) * 2
+                    });
+                }
+
+                // Evening Doji Star (stronger than Evening Star)
+                if (prev2.IsBullish && prev.IsDoji && prev.Low > prev2.Close && c.IsBearish && c.Close < prev2.BodyCenter)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.EveningDojiStar,
+                        PatternName = "Evening Doji Star",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 78,
+                        HistoricalWinRate = 71,
+                        Description = "Evening Star with Doji center. Stronger than regular Evening Star. Bulkowski: reversal 71%.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.High,
+                        SuggestedTarget = c.Close - (prev.High - c.Close) * 2
+                    });
+                }
+
+                // Three Inside Up (confirmed bullish harami — rank 20/103)
+                if (prev2.IsBearish && prev.IsBullish && prev.Body < prev2.Body
+                    && prev.High < prev2.Open && prev.Low > prev2.Close
+                    && c.IsBullish && c.Close > prev2.Open)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.ThreeInsideUp,
+                        PatternName = "Three Inside Up",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 72,
+                        HistoricalWinRate = 65,
+                        Description = "Confirmed bullish harami. Bulkowski: reversal 65%, overall rank 20/103 (VERY GOOD). Much better than plain Harami.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = Math.Min(prev.Low, prev2.Low),
+                        SuggestedTarget = c.Close + (c.Close - prev2.Low) * 1.5m
+                    });
+                }
+
+                // Three Inside Down (confirmed bearish harami)
+                if (prev2.IsBullish && prev.IsBearish && prev.Body < prev2.Body
+                    && prev.High < prev2.Close && prev.Low > prev2.Open
+                    && c.IsBearish && c.Close < prev2.Open)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.ThreeInsideDown,
+                        PatternName = "Three Inside Down",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 72,
+                        HistoricalWinRate = 65,
+                        Description = "Confirmed bearish harami. Much more reliable than plain Bearish Harami.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = Math.Max(prev.High, prev2.High),
+                        SuggestedTarget = c.Close - (prev2.High - c.Close) * 1.5m
+                    });
+                }
+
+                // Three Outside Up (confirmed bullish engulfing)
+                if (prev2.IsBearish && prev.IsBullish && prev.Open <= prev2.Close && prev.Close >= prev2.Open && prev.Body > prev2.Body
+                    && c.IsBullish && c.Close > prev.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.ThreeOutsideUp,
+                        PatternName = "Three Outside Up",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 75,
+                        HistoricalWinRate = 65,
+                        Description = "Bullish engulfing + bullish confirmation candle. Stronger than standalone Bullish Engulfing.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = Math.Min(prev.Low, prev2.Low),
+                        SuggestedTarget = c.Close + (c.Close - prev2.Low)
+                    });
+                }
+
+                // Three Outside Down (confirmed bearish engulfing)
+                if (prev2.IsBullish && prev.IsBearish && prev.Open >= prev2.Close && prev.Close <= prev2.Open && prev.Body > prev2.Body
+                    && c.IsBearish && c.Close < prev.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.ThreeOutsideDown,
+                        PatternName = "Three Outside Down",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 75,
+                        HistoricalWinRate = 65,
+                        Description = "Bearish engulfing + bearish confirmation candle. Stronger than standalone Bearish Engulfing.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = Math.Max(prev.High, prev2.High),
+                        SuggestedTarget = c.Close - (prev2.High - c.Close)
+                    });
+                }
+
+                // Advance Block (bearish warning — weakening Three White Soldiers)
+                if (prev2.IsBullish && prev.IsBullish && c.IsBullish
+                    && prev.Close > prev2.Close && c.Close > prev.Close
+                    && (prev.Body < prev2.Body * 0.8m || c.Body < prev.Body * 0.8m)
+                    && (c.UpperWick > c.Body * 0.5m || prev.UpperWick > prev.Body * 0.5m))
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.AdvanceBlock,
+                        PatternName = "Advance Block",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 65,
+                        HistoricalWinRate = 65,
+                        Description = "Looks like Three White Soldiers but bodies shrinking and/or upper shadows growing. Bullish momentum FADING. Bulkowski: reversal 65%.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = c.High,
+                        SuggestedTarget = c.Close - (c.Close - prev2.Open) * 0.5m
+                    });
+                }
+
+                // Abandoned Baby Bullish (island Doji — rare & powerful)
+                if (prev2.IsBearish && prev.IsDoji && prev.High < prev2.Low && c.IsBullish && c.Low > prev.High)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.AbandonedBaby,
+                        PatternName = "Bullish Abandoned Baby",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 85,
+                        HistoricalWinRate = 70,
+                        Description = "Island Doji with gaps on BOTH sides. Very rare, very powerful. Bulkowski: reversal ~70%.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.Low,
+                        SuggestedTarget = c.Close + (c.Close - prev.Low) * 2.5m
+                    });
+                }
+
+                // Abandoned Baby Bearish
+                if (prev2.IsBullish && prev.IsDoji && prev.Low > prev2.High && c.IsBearish && c.High < prev.Low)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.AbandonedBaby,
+                        PatternName = "Bearish Abandoned Baby",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 85,
+                        HistoricalWinRate = 70,
+                        Description = "Island Doji with gaps on BOTH sides. Very rare, very powerful bearish reversal.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.High,
+                        SuggestedTarget = c.Close - (prev.High - c.Close) * 2.5m
+                    });
+                }
+
+                // Stick Sandwich (black-white-black, both blacks close at same price)
+                if (prev2.IsBearish && prev.IsBullish && c.IsBearish
+                    && Math.Abs(prev2.Close - c.Close) < avgRange * 0.03m)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.StickSandwich,
+                        PatternName = "Stick Sandwich",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 55,
+                        HistoricalWinRate = 56,
+                        Description = "Black-white-black with matching closes. Bulkowski: reversal 56%, rank 87/103. Weak signal.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = prev.High,
+                        SuggestedStop = c.Low,
+                        SuggestedTarget = prev.High + (prev.High - c.Low) * 1.5m
+                    });
+                }
+
+                // Upside Tasuki Gap (bullish continuation)
+                if (prev2.IsBullish && prev.IsBullish && prev.Open > prev2.Close
+                    && c.IsBearish && c.Open > prev.Open && c.Open < prev.Close
+                    && c.Close < prev.Open && c.Close > prev2.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.UpsideTasukiGap,
+                        PatternName = "Upside Tasuki Gap",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 62,
+                        HistoricalWinRate = 57,
+                        Description = "Gap up followed by pullback that doesn't fill gap. Bullish continuation — gap support holds.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev2.Close - avgRange * 0.2m,
+                        SuggestedTarget = c.Close + prev.Body
+                    });
+                }
+
+                // Downside Tasuki Gap (bearish continuation)
+                if (prev2.IsBearish && prev.IsBearish && prev.Open < prev2.Close
+                    && c.IsBullish && c.Open < prev.Open && c.Open > prev.Close
+                    && c.Close > prev.Open && c.Close < prev2.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.DownsideTasukiGap,
+                        PatternName = "Downside Tasuki Gap",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 62,
+                        HistoricalWinRate = 57,
+                        Description = "Gap down followed by rally that doesn't fill gap. Bearish continuation — gap resistance holds.",
+                        StartIndex = i - 2,
+                        EndIndex = i,
+                        StartDate = prev2.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev2.Close + avgRange * 0.2m,
+                        SuggestedTarget = c.Close - prev.Body
+                    });
+                }
+            }
+
+            // ===== FOUR/FIVE CANDLE PATTERNS =====
+            if (i >= 4)
+            {
+                var c4 = candles[i - 3];
+                var c5 = i >= 4 ? candles[i - 4] : null;
+
+                // Bearish Three-Line Strike (3 black + 1 white engulfing — Bulkowski: BULLISH reversal 84%!)
+                if (c4.IsBearish && prev2.IsBearish && prev.IsBearish
+                    && prev2.Close < c4.Close && prev.Close < prev2.Close
+                    && c.IsBullish && c.Close >= c4.Open && c.Open <= prev.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.BearishThreeLineStrike,
+                        PatternName = "Bearish Three-Line Strike",
+                        Direction = PatternDirection.Bullish, // OPPOSITE of name! per Bulkowski
+                        Confidence = 75,
+                        HistoricalWinRate = 84,
+                        Description = "3 black + white engulfing. PARADOX: Bulkowski found BULLISH reversal 84%! Overall rank 1/103. Extremely rare.",
+                        StartIndex = i - 3,
+                        EndIndex = i,
+                        StartDate = c4.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.Low,
+                        SuggestedTarget = c.Close + (c.Close - prev.Low) * 2
+                    });
+                }
+
+                // Bullish Three-Line Strike (3 white + 1 black engulfing — Bulkowski: BEARISH reversal 65%)
+                if (c4.IsBullish && prev2.IsBullish && prev.IsBullish
+                    && prev2.Close > c4.Close && prev.Close > prev2.Close
+                    && c.IsBearish && c.Close <= c4.Open && c.Open >= prev.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.BullishThreeLineStrike,
+                        PatternName = "Bullish Three-Line Strike",
+                        Direction = PatternDirection.Bearish, // OPPOSITE of name! per Bulkowski
+                        Confidence = 68,
+                        HistoricalWinRate = 65,
+                        Description = "3 white + black engulfing. PARADOX: Bulkowski found BEARISH reversal 65%. Extremely rare.",
+                        StartIndex = i - 3,
+                        EndIndex = i,
+                        StartDate = c4.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.High,
+                        SuggestedTarget = c.Close - (prev.High - c.Close) * 2
+                    });
+                }
+
+                // Rising Three Methods (bullish continuation — 5 candles)
+                if (c5 is not null && c5.IsBullish && c5.Body > avgRange * 0.5m
+                    && c4.IsBearish && c4.Body < c5.Body * 0.5m && c4.Low > c5.Low
+                    && prev2.Body < c5.Body * 0.5m && prev2.Low > c5.Low
+                    && prev.Body < c5.Body * 0.5m && prev.Low > c5.Low
+                    && c.IsBullish && c.Close > c5.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.RisingThreeMethods,
+                        PatternName = "Rising Three Methods",
+                        Direction = PatternDirection.Bullish,
+                        Confidence = 72,
+                        HistoricalWinRate = 65,
+                        Description = "Long white, 3 small candles inside range, then white closing above first. Bulkowski: continuation 65%. Brief rest in uptrend.",
+                        StartIndex = i - 4,
+                        EndIndex = i,
+                        StartDate = c5.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.Low,
+                        SuggestedTarget = c.Close + c5.Body
+                    });
+                }
+
+                // Falling Three Methods (bearish continuation — 5 candles)
+                if (c5 is not null && c5.IsBearish && c5.Body > avgRange * 0.5m
+                    && c4.IsBullish && c4.Body < c5.Body * 0.5m && c4.High < c5.High
+                    && prev2.Body < c5.Body * 0.5m && prev2.High < c5.High
+                    && prev.Body < c5.Body * 0.5m && prev.High < c5.High
+                    && c.IsBearish && c.Close < c5.Close)
+                {
+                    results.Add(new PatternResult
+                    {
+                        PatternType = PatternType.FallingThreeMethods,
+                        PatternName = "Falling Three Methods",
+                        Direction = PatternDirection.Bearish,
+                        Confidence = 72,
+                        HistoricalWinRate = 65,
+                        Description = "Long black, 3 small candles inside range, then black closing below first. Bearish continuation — brief rest in downtrend.",
+                        StartIndex = i - 4,
+                        EndIndex = i,
+                        StartDate = c5.Time,
+                        EndDate = c.Time,
+                        SuggestedEntry = c.Close,
+                        SuggestedStop = prev.High,
+                        SuggestedTarget = c.Close - c5.Body
                     });
                 }
             }

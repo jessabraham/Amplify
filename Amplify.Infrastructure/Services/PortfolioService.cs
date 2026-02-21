@@ -1,20 +1,27 @@
 ﻿using Amplify.Application.Common.DTOs.Trading;
+using Amplify.Application.Common.Interfaces.Market;
 using Amplify.Application.Common.Interfaces.Trading;
 using Amplify.Application.Common.Models;
+using Amplify.Domain.Entities.Identity;
 using Amplify.Domain.Entities.Trading;
 using Amplify.Domain.Enumerations;
 using Amplify.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Amplify.Infrastructure.Services;
 
 public class PortfolioService : IPortfolioService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IMarketDataService _marketData;
+    private readonly ILogger<PortfolioService> _logger;
 
-    public PortfolioService(ApplicationDbContext context)
+    public PortfolioService(ApplicationDbContext context, IMarketDataService marketData, ILogger<PortfolioService> logger)
     {
         _context = context;
+        _marketData = marketData;
+        _logger = logger;
     }
 
     // ── Positions ───────────────────────────────────────────────────
@@ -52,6 +59,34 @@ public class PortfolioService : IPortfolioService
 
     public async Task<Result<PositionDto>> OpenPositionAsync(PositionDto dto, string userId)
     {
+        // Validate cash available
+        var user = await _context.Users
+            .OfType<ApplicationUser>()
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user is not null)
+        {
+            var currentInvested = await _context.Positions
+                .Where(p => p.UserId == userId && p.Status == PositionStatus.Open && p.IsActive)
+                .SumAsync(p => p.EntryPrice * p.Quantity);
+
+            var realizedPnL = 0m;
+            try
+            {
+                realizedPnL = await _context.SimulatedTrades
+                    .Where(t => t.UserId == userId && t.Status == SimulationStatus.Resolved)
+                    .SumAsync(t => t.PnLDollars ?? 0);
+            }
+            catch { }
+
+            var cashAvailable = user.StartingCapital + realizedPnL - currentInvested;
+            var positionCost = dto.EntryPrice * dto.Quantity;
+
+            if (positionCost > cashAvailable)
+                return Result<PositionDto>.Failure(
+                    $"Insufficient cash. Position costs {positionCost:C0} but only {cashAvailable:C0} available.");
+        }
+
         var position = new Position
         {
             Symbol = dto.Symbol,
@@ -115,6 +150,19 @@ public class PortfolioService : IPortfolioService
         return Result<PositionDto>.Success(MapToDto(position));
     }
 
+    public async Task<Result<bool>> DeletePositionAsync(Guid positionId, string userId)
+    {
+        var position = await _context.Positions.FindAsync(positionId);
+        if (position is null)
+            return Result<bool>.Failure("Position not found");
+        if (position.UserId != userId)
+            return Result<bool>.Failure("Not authorized");
+
+        _context.Positions.Remove(position);
+        await _context.SaveChangesAsync();
+        return Result<bool>.Success(true);
+    }
+
     public async Task<Result<PositionDto>> UpdateCurrentPriceAsync(Guid positionId, decimal currentPrice)
     {
         var position = await _context.Positions.FindAsync(positionId);
@@ -146,6 +194,34 @@ public class PortfolioService : IPortfolioService
         var openPositions = await _context.Positions
             .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
             .ToListAsync();
+
+        // Refresh current prices from market data
+        if (openPositions.Any())
+        {
+            var symbols = openPositions.Select(p => p.Symbol).Distinct();
+            foreach (var symbol in symbols)
+            {
+                try
+                {
+                    var candles = await _marketData.GetCandlesAsync(symbol, 1, "1H");
+                    if (candles.Count > 0)
+                    {
+                        var latestPrice = candles.Last().Close;
+                        foreach (var pos in openPositions.Where(p => p.Symbol == symbol))
+                        {
+                            pos.CurrentPrice = latestPrice;
+                            var dir = pos.SignalType == SignalType.Short ? -1 : 1;
+                            pos.UnrealizedPnL = dir * (latestPrice - pos.EntryPrice) * pos.Quantity;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to refresh price for {Symbol} during portfolio summary", symbol);
+                }
+            }
+            await _context.SaveChangesAsync();
+        }
 
         var closedCount = await _context.Positions
             .CountAsync(p => p.UserId == userId && p.Status == PositionStatus.Closed);

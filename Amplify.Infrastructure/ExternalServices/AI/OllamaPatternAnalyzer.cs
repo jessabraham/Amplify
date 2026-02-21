@@ -11,12 +11,23 @@ public class OllamaPatternAnalyzer : IPatternAnalyzer
     private readonly HttpClient _http;
     private readonly string _model;
     private readonly string _baseUrl;
+    private readonly string _knowledgeBase;
 
     public OllamaPatternAnalyzer(HttpClient http, IConfiguration config)
     {
         _http = http;
         _baseUrl = config["Ollama:BaseUrl"] ?? "http://localhost:11434";
         _model = config["Ollama:Model"] ?? "qwen3:8b";
+
+        // Load pattern knowledge base for AI validation
+        var kbPath = Path.Combine(AppContext.BaseDirectory, "PatternKnowledgeBase.md");
+        if (!File.Exists(kbPath))
+        {
+            // Try relative path from Infrastructure project
+            kbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..",
+                "Amplify.Infrastructure", "ExternalServices", "AI", "PatternKnowledgeBase.md");
+        }
+        _knowledgeBase = File.Exists(kbPath) ? File.ReadAllText(kbPath) : "";
     }
 
     public async Task<PatternAnalysis> AnalyzePatternAsync(PatternResult pattern, List<Candle> recentCandles, string symbol)
@@ -41,6 +52,14 @@ SUGGESTED LEVELS:
 
 RECENT PRICE ACTION (last 10 candles):
 {priceContext}
+
+PATTERN VALIDATION REFERENCE FOR ""{pattern.PatternName}"":
+{GetPatternKnowledge(pattern.PatternName)}
+
+VALIDATION INSTRUCTIONS:
+- Check if the prerequisite trend context is correct (bullish reversal needs prior downtrend, etc.)
+- Verify the candle structure matches the textbook definition
+- If invalid, set isValid=false and explain why
 
 Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
 {{
@@ -100,6 +119,18 @@ DETECTED PATTERNS:
 RECENT PRICE ACTION (last 10 candles):
 {priceContext}
 
+PATTERN VALIDATION REFERENCE:
+{(_knowledgeBase.Length > 0 ? _knowledgeBase : "No knowledge base loaded.")}
+
+CRITICAL VALIDATION INSTRUCTIONS:
+- Use the PATTERN VALIDATION REFERENCE above to check each detected pattern against its textbook definition.
+- Validate the PREREQUISITE TREND for each pattern. A Hammer in an uptrend is invalid. A Shooting Star in a downtrend is invalid. Bullish reversal patterns need a prior downtrend. Bearish reversal patterns need a prior uptrend.
+- Check the CANDLE STRUCTURE rules. Engulfing requires opposite-color candles. Hammer needs lower shadow >= 2x body. Morning Star needs 3 candles with specific relationships.
+- If a pattern fails its textbook definition, set isValid=false and explain why in oneLineReason.
+- For ENTRY, STOP, and TARGET: follow the measured move and stop placement rules from the knowledge base, adjusted for the actual S/R levels visible in the price action.
+- A pattern's opposite cannot coexist on the same candles. If both bullish and bearish patterns appear on the same date range, invalidate the one that contradicts the prior trend.
+- CRITICAL PRICE RULE: Current price is {currentPrice:F2}. ALL entry/stop/target values MUST be within 15% of current price. Entry should be near current price. Stop should be 2-5% away. Target should be based on measured move or key levels. NEVER suggest prices that are more than 15% away from {currentPrice:F2}.
+
 Analyze ALL patterns together. Consider:
 1. Do the patterns confirm or contradict each other?
 2. Which patterns are strongest and most reliable?
@@ -122,7 +153,10 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
       ""patternName"": ""<name>"",
       ""isValid"": <true/false>,
       ""grade"": ""<A+/A/B+/B/C/D/F>"",
-      ""oneLineReason"": ""<brief reason>""
+      ""oneLineReason"": ""<brief reason>"",
+      ""entry"": <exact price for entry based on pattern and context>,
+      ""stop"": <exact stop loss price based on support/resistance and ATR>,
+      ""target"": <exact target price based on measured move and key levels>
     }}
   ]
 }}";
@@ -132,19 +166,69 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
             var response = await CallOllama(prompt);
             var analysis = ParseMultiPatternAnalysis(response);
             analysis.Symbol = symbol;
+
+            // Price sanity check — nullify hallucinated levels
+            if (currentPrice > 0)
+            {
+                var maxDrift = currentPrice * 0.20m;
+
+                if (analysis.RecommendedEntry.HasValue &&
+                    Math.Abs(analysis.RecommendedEntry.Value - currentPrice) > maxDrift)
+                {
+                    Console.WriteLine($"⚠️ AI hallucinated entry {analysis.RecommendedEntry} for {symbol} (current: {currentPrice}), resetting levels");
+                    analysis.RecommendedEntry = null;
+                    analysis.RecommendedStop = null;
+                    analysis.RecommendedTarget = null;
+                }
+
+                if (analysis.RecommendedStop.HasValue &&
+                    Math.Abs(analysis.RecommendedStop.Value - currentPrice) > maxDrift)
+                    analysis.RecommendedStop = null;
+
+                if (analysis.RecommendedTarget.HasValue &&
+                    Math.Abs(analysis.RecommendedTarget.Value - currentPrice) > maxDrift)
+                    analysis.RecommendedTarget = null;
+
+                if (analysis.PatternVerdicts is not null)
+                {
+                    foreach (var v in analysis.PatternVerdicts)
+                    {
+                        if (v.Entry.HasValue && Math.Abs(v.Entry.Value - currentPrice) > maxDrift) v.Entry = null;
+                        if (v.Stop.HasValue && Math.Abs(v.Stop.Value - currentPrice) > maxDrift) v.Stop = null;
+                        if (v.Target.HasValue && Math.Abs(v.Target.Value - currentPrice) > maxDrift) v.Target = null;
+                    }
+                }
+            }
+
+            // If AI levels were nullified, fall back to best pattern levels
+            if (!analysis.RecommendedEntry.HasValue && patterns.Any())
+            {
+                var best = patterns.OrderByDescending(p => p.Confidence).First();
+                analysis.RecommendedEntry = best.SuggestedEntry;
+                analysis.RecommendedStop = best.SuggestedStop;
+                analysis.RecommendedTarget = best.SuggestedTarget;
+            }
+
             return analysis;
         }
         catch
         {
+            var bestPattern = patterns.OrderByDescending(p => p.Confidence).FirstOrDefault();
+
             return new MultiPatternAnalysis
             {
                 Symbol = symbol,
                 OverallBias = bullishCount > bearishCount ? "Bullish" : bearishCount > bullishCount ? "Bearish" : "Neutral",
                 OverallConfidence = patterns.Any() ? patterns.Average(p => p.Confidence) : 0,
-                Summary = "AI synthesis unavailable — showing math-only analysis.",
-                DetailedAnalysis = $"Found {bullishCount} bullish and {bearishCount} bearish patterns. Manual review recommended.",
+                Summary = "AI synthesis unavailable — showing math-only analysis based on detected patterns.",
+                DetailedAnalysis = $"Found {bullishCount} bullish and {bearishCount} bearish patterns. Levels from highest-confidence pattern ({bestPattern?.PatternName ?? "none"}).",
                 RecommendedAction = bullishCount > bearishCount ? "Watch" : "Wait",
-                RiskReward = "N/A"
+                RecommendedEntry = bestPattern?.SuggestedEntry,
+                RecommendedStop = bestPattern?.SuggestedStop,
+                RecommendedTarget = bestPattern?.SuggestedTarget,
+                RiskReward = bestPattern is not null && bestPattern.SuggestedStop > 0
+                    ? $"1:{Math.Round(Math.Abs(bestPattern.SuggestedTarget - bestPattern.SuggestedEntry) / Math.Abs(bestPattern.SuggestedEntry - bestPattern.SuggestedStop), 1)}"
+                    : "N/A"
             };
         }
     }
@@ -174,7 +258,9 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
         };
 
         var content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
-        var response = await _http.PostAsync($"{_baseUrl}/api/generate", content);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        var response = await _http.PostAsync($"{_baseUrl}/api/generate", content, cts.Token);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
@@ -252,13 +338,20 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
             {
                 foreach (var v in verdicts.EnumerateArray())
                 {
-                    analysis.PatternVerdicts.Add(new PatternVerdict
+                    var verdict = new PatternVerdict
                     {
                         PatternName = v.TryGetProperty("patternName", out var pn) ? pn.GetString() ?? "" : "",
                         IsValid = v.TryGetProperty("isValid", out var iv) && iv.GetBoolean(),
                         Grade = v.TryGetProperty("grade", out var g) ? g.GetString() ?? "C" : "C",
                         OneLineReason = v.TryGetProperty("oneLineReason", out var olr) ? olr.GetString() ?? "" : ""
-                    });
+                    };
+                    if (v.TryGetProperty("entry", out var ve) && ve.ValueKind == JsonValueKind.Number)
+                        verdict.Entry = ve.GetDecimal();
+                    if (v.TryGetProperty("stop", out var vs) && vs.ValueKind == JsonValueKind.Number)
+                        verdict.Stop = vs.GetDecimal();
+                    if (v.TryGetProperty("target", out var vt) && vt.ValueKind == JsonValueKind.Number)
+                        verdict.Target = vt.GetDecimal();
+                    analysis.PatternVerdicts.Add(verdict);
                 }
             }
 
@@ -379,6 +472,9 @@ Direction Alignment: {directionAlignment} (score: {alignmentScore:F0}%)
 ═══ KEY PRICE LEVELS ═══
 {levelsSection}
 {performanceSection}
+═══ PATTERN VALIDATION REFERENCE ═══
+{(_knowledgeBase.Length > 0 ? _knowledgeBase : "No knowledge base loaded.")}
+
 ═══ ANALYSIS RULES ═══
 1. Weekly patterns OVERRIDE conflicting daily/4H patterns
 2. All-timeframe alignment = high conviction (80%+)
@@ -386,7 +482,11 @@ Direction Alignment: {directionAlignment} (score: {alignmentScore:F0}%)
 4. Patterns at key support/resistance levels are MORE significant
 5. Overbought RSI + bullish pattern = caution (potential exhaustion)
 6. Breakout volume (>2x avg) confirms pattern validity
-7. Price far from SMA200 (>15%) = extended, reversal risk higher{perfRules}
+7. Price far from SMA200 (>15%) = extended, reversal risk higher
+8. VALIDATE each pattern against the PATTERN VALIDATION REFERENCE. Check prerequisite trend, candle structure, and confirmation rules. Mark patterns as isValid=false if they fail textbook definitions.
+9. A pattern and its opposite CANNOT coexist on the same candles. If both appear, invalidate the one that contradicts the prior trend.
+10. For entry/stop/target: follow the measured move rules from the knowledge base, adjusted for actual S/R levels.
+11. CRITICAL PRICE RULE: Current price is {currentPrice:F2}. ALL entry/stop/target values MUST be within 15% of current price. Entry should be near current price. Stop should be 2-5% away. Target should be based on measured move or key levels. NEVER suggest prices that are more than 15% away from {currentPrice:F2}.{perfRules}
 
 Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
 {{
@@ -404,7 +504,10 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
       ""patternName"": ""<n>"",
       ""isValid"": <true/false>,
       ""grade"": ""<A+/A/B+/B/C/D/F>"",
-      ""oneLineReason"": ""<brief reason including which timeframe{perfVerdictHint}>""
+      ""oneLineReason"": ""<brief reason including which timeframe{perfVerdictHint}>"",
+      ""entry"": <exact price for entry based on pattern and full context>,
+      ""stop"": <exact stop loss price based on support/resistance and ATR>,
+      ""target"": <exact target price based on measured move and key levels>
     }}
   ]
 }}";
@@ -414,22 +517,116 @@ Respond in this EXACT JSON format (no markdown, no code blocks, just raw JSON):
             var response = await CallOllama(prompt);
             var analysis = ParseMultiPatternAnalysis(response);
             analysis.Symbol = symbol;
+
+            // ── Price sanity check: nullify AI levels that are wildly off current price ──
+            // Smaller models (qwen2.5) sometimes hallucinate prices unrelated to current price
+            if (currentPrice > 0)
+            {
+                var maxDrift = currentPrice * 0.20m;
+
+                if (analysis.RecommendedEntry.HasValue &&
+                    Math.Abs(analysis.RecommendedEntry.Value - currentPrice) > maxDrift)
+                {
+                    Console.WriteLine($"⚠️ AI hallucinated entry {analysis.RecommendedEntry} for {symbol} (current: {currentPrice}), resetting levels");
+                    analysis.RecommendedEntry = null;
+                    analysis.RecommendedStop = null;
+                    analysis.RecommendedTarget = null;
+                }
+
+                if (analysis.RecommendedStop.HasValue &&
+                    Math.Abs(analysis.RecommendedStop.Value - currentPrice) > maxDrift)
+                    analysis.RecommendedStop = null;
+
+                if (analysis.RecommendedTarget.HasValue &&
+                    Math.Abs(analysis.RecommendedTarget.Value - currentPrice) > maxDrift)
+                    analysis.RecommendedTarget = null;
+
+                if (analysis.PatternVerdicts is not null)
+                {
+                    foreach (var v in analysis.PatternVerdicts)
+                    {
+                        if (v.Entry.HasValue && Math.Abs(v.Entry.Value - currentPrice) > maxDrift) v.Entry = null;
+                        if (v.Stop.HasValue && Math.Abs(v.Stop.Value - currentPrice) > maxDrift) v.Stop = null;
+                        if (v.Target.HasValue && Math.Abs(v.Target.Value - currentPrice) > maxDrift) v.Target = null;
+                    }
+                }
+            }
+
             return analysis;
         }
         catch
         {
             var bullish = topPatterns.Count(p => p.Direction == Domain.Enumerations.PatternDirection.Bullish);
             var bearish = topPatterns.Count(p => p.Direction == Domain.Enumerations.PatternDirection.Bearish);
+
+            // Derive levels from the highest-confidence pattern
+            var bestPattern = topPatterns.OrderByDescending(p => p.Confidence).FirstOrDefault();
+
             return new MultiPatternAnalysis
             {
                 Symbol = symbol,
                 OverallBias = bullish > bearish ? "Bullish" : bearish > bullish ? "Bearish" : "Neutral",
                 OverallConfidence = topPatterns.Any() ? topPatterns.Average(p => p.Confidence) : 0,
-                Summary = "AI synthesis unavailable — showing math-only analysis.",
-                DetailedAnalysis = $"Multi-timeframe scan: {directionAlignment} direction alignment ({alignmentScore:F0}%). Combined regime: {combinedRegime}. Manual review recommended.",
+                Summary = "AI synthesis unavailable — showing math-only analysis based on detected patterns.",
+                DetailedAnalysis = $"Multi-timeframe scan: {directionAlignment} direction alignment ({alignmentScore:F0}%). Combined regime: {combinedRegime}. Levels derived from highest-confidence pattern ({bestPattern?.PatternName ?? "none"}).",
                 RecommendedAction = directionAlignment.Contains("All") ? "Watch" : "Wait",
-                RiskReward = "N/A"
+                RecommendedEntry = bestPattern?.SuggestedEntry,
+                RecommendedStop = bestPattern?.SuggestedStop,
+                RecommendedTarget = bestPattern?.SuggestedTarget,
+                RiskReward = bestPattern is not null && bestPattern.SuggestedStop > 0
+                    ? $"1:{Math.Round(Math.Abs(bestPattern.SuggestedTarget - bestPattern.SuggestedEntry) / Math.Abs(bestPattern.SuggestedEntry - bestPattern.SuggestedStop), 1)}"
+                    : "N/A"
             };
         }
+    }
+
+    /// <summary>
+    /// Extracts the relevant knowledge base section for a specific pattern name.
+    /// Falls back to the critical validation rules if the exact pattern isn't found.
+    /// </summary>
+    private string GetPatternKnowledge(string patternName)
+    {
+        if (string.IsNullOrEmpty(_knowledgeBase))
+            return "No pattern knowledge base available.";
+
+        // Try to find the exact pattern section (### PatternName)
+        var header = $"### {patternName}";
+        var startIdx = _knowledgeBase.IndexOf(header, StringComparison.OrdinalIgnoreCase);
+
+        if (startIdx >= 0)
+        {
+            // Find the next ### header or end of file
+            var nextHeader = _knowledgeBase.IndexOf("\n### ", startIdx + header.Length, StringComparison.OrdinalIgnoreCase);
+            var endIdx = nextHeader >= 0 ? nextHeader : _knowledgeBase.Length;
+
+            var section = _knowledgeBase.Substring(startIdx, endIdx - startIdx).Trim();
+
+            // Also append the critical validation rules
+            var rulesIdx = _knowledgeBase.IndexOf("## CRITICAL VALIDATION RULES", StringComparison.OrdinalIgnoreCase);
+            if (rulesIdx >= 0)
+                section += "\n\n" + _knowledgeBase.Substring(rulesIdx);
+
+            return section;
+        }
+
+        // Pattern not found by exact name — try partial match
+        var words = patternName.Split(' ');
+        foreach (var word in words.Where(w => w.Length > 3))
+        {
+            var partialIdx = _knowledgeBase.IndexOf($"### {word}", StringComparison.OrdinalIgnoreCase);
+            if (partialIdx < 0)
+                partialIdx = _knowledgeBase.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+            if (partialIdx >= 0)
+            {
+                var lineStart = _knowledgeBase.LastIndexOf('\n', partialIdx);
+                var nextH = _knowledgeBase.IndexOf("\n### ", partialIdx + 1, StringComparison.OrdinalIgnoreCase);
+                var end = nextH >= 0 ? nextH : Math.Min(partialIdx + 1500, _knowledgeBase.Length);
+                return _knowledgeBase.Substring(lineStart >= 0 ? lineStart : partialIdx, end - (lineStart >= 0 ? lineStart : partialIdx)).Trim();
+            }
+        }
+
+        // Fallback: just return the critical rules section
+        var fallbackIdx = _knowledgeBase.IndexOf("## CRITICAL VALIDATION RULES", StringComparison.OrdinalIgnoreCase);
+        return fallbackIdx >= 0 ? _knowledgeBase.Substring(fallbackIdx) : "No specific knowledge available for this pattern.";
     }
 }

@@ -90,13 +90,36 @@ public class RiskEngine : IRiskEngine
             ? Math.Round(result.RewardPerShare2.Value / result.RiskPerShare, 2)
             : null;
 
-        // ── Position Sizing (Fixed-Percent Method) ───────────────────
-        result.RiskAmountDollars = Math.Round(input.PortfolioSize * riskPercent / 100m, 2);
+        // ── Position Sizing ──────────────────────────────────────────
+        // If PositionBudget is provided, size from that (user says "I want to invest $X").
+        // Otherwise fall back to Fixed-Percent risk method.
+        // Crypto assets allow fractional units; stocks use whole shares.
+        var isCrypto = input.Symbol.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
+            && !input.Symbol.Contains(".")
+            && input.Symbol.Length <= 10
+            && new[] { "BTC", "ETH", "SOL", "DOGE", "XRP", "ADA", "AVAX", "DOT", "MATIC", "LINK", "SHIB", "LTC" }
+                .Any(c => input.Symbol.StartsWith(c, StringComparison.OrdinalIgnoreCase));
 
-        if (result.RiskPerShare > 0)
+        if (input.PositionBudget.HasValue && input.PositionBudget.Value > 0 && input.EntryPrice > 0)
         {
-            result.ShareCount = Math.Floor(result.RiskAmountDollars / result.RiskPerShare);
+            result.ShareCount = isCrypto
+                ? Math.Round(input.PositionBudget.Value / input.EntryPrice, 6)
+                : Math.Floor(input.PositionBudget.Value / input.EntryPrice);
             result.PositionSize = Math.Round(result.ShareCount * input.EntryPrice, 2);
+            result.RiskAmountDollars = result.RiskPerShare > 0
+                ? Math.Round(result.ShareCount * result.RiskPerShare, 2)
+                : Math.Round(input.PortfolioSize * riskPercent / 100m, 2);
+        }
+        else
+        {
+            result.RiskAmountDollars = Math.Round(input.PortfolioSize * riskPercent / 100m, 2);
+            if (result.RiskPerShare > 0)
+            {
+                result.ShareCount = isCrypto
+                    ? Math.Round(result.RiskAmountDollars / result.RiskPerShare, 6)
+                    : Math.Floor(result.RiskAmountDollars / result.RiskPerShare);
+                result.PositionSize = Math.Round(result.ShareCount * input.EntryPrice, 2);
+            }
         }
 
         result.PositionValue = result.PositionSize;

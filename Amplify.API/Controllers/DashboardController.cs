@@ -1,4 +1,7 @@
-﻿using Amplify.Infrastructure.Persistence;
+﻿using Amplify.Application.Common.Interfaces.Market;
+using Amplify.Domain.Entities.Identity;
+using Amplify.Domain.Enumerations;
+using Amplify.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,9 +15,13 @@ namespace Amplify.API.Controllers;
 public class DashboardController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly IMarketDataService _marketData;
 
-    public DashboardController(ApplicationDbContext context)
-        => _context = context;
+    public DashboardController(ApplicationDbContext context, IMarketDataService marketData)
+    {
+        _context = context;
+        _marketData = marketData;
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetDashboard()
@@ -65,11 +72,53 @@ public class DashboardController : ControllerBase
             var totalUnrealizedPnL = 0m;
             var openPositionCount = 0;
             var portfolioPositions = new List<object>();
+            var realizedPnL = 0m;
+
+            // Get user's starting capital
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            var startingCapital = user?.StartingCapital ?? 100_000m;
+
+            // Realized P&L from resolved simulated trades
+            try
+            {
+                realizedPnL = await _context.SimulatedTrades
+                    .Where(t => t.UserId == userId && t.Status == Domain.Enumerations.SimulationStatus.Resolved)
+                    .SumAsync(t => t.PnLDollars ?? 0);
+            }
+            catch { }
+
             try
             {
                 var openPositions = await _context.Positions
                     .Where(p => p.UserId == userId && p.Status == Domain.Enumerations.PositionStatus.Open && p.IsActive)
                     .ToListAsync();
+
+                // Refresh current prices from market data
+                if (openPositions.Any())
+                {
+                    var symbols = openPositions.Select(p => p.Symbol).Distinct();
+                    foreach (var sym in symbols)
+                    {
+                        try
+                        {
+                            var candles = await _marketData.GetCandlesAsync(sym, 1, "1H");
+                            if (candles.Count > 0)
+                            {
+                                var latestPrice = candles.Last().Close;
+                                foreach (var pos in openPositions.Where(p => p.Symbol == sym))
+                                {
+                                    pos.CurrentPrice = latestPrice;
+                                    var dir = pos.SignalType == SignalType.Short ? -1 : 1;
+                                    pos.UnrealizedPnL = dir * (latestPrice - pos.EntryPrice) * pos.Quantity;
+                                    if (pos.EntryPrice > 0)
+                                        pos.ReturnPercent = Math.Round((latestPrice - pos.EntryPrice) / pos.EntryPrice * 100m * dir, 2);
+                                }
+                            }
+                        }
+                        catch { /* price refresh is best-effort */ }
+                    }
+                    await _context.SaveChangesAsync();
+                }
 
                 totalInvested = openPositions.Sum(p => p.EntryPrice * p.Quantity);
                 totalUnrealizedPnL = openPositions.Sum(p => p.UnrealizedPnL);
@@ -157,6 +206,10 @@ public class DashboardController : ControllerBase
                 TotalInvested = Math.Round(totalInvested, 2),
                 TotalUnrealizedPnL = Math.Round(totalUnrealizedPnL, 2),
                 OpenPositionCount = openPositionCount,
+                StartingCapital = startingCapital,
+                CashAvailable = Math.Round(Math.Max(startingCapital + realizedPnL - totalInvested, 0), 2),
+                RealizedPnL = Math.Round(realizedPnL, 2),
+                PortfolioValue = Math.Round(startingCapital + realizedPnL + totalUnrealizedPnL, 2),
                 TopPositions = portfolioPositions,
                 RecentPatterns = recentPatterns,
                 RecentRegimes = recentRegimes

@@ -45,6 +45,12 @@ public class Position : IEntity, ISoftDeletable
     // Optional notes
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// True if this position was auto-created by the AI background scanner.
+    /// False for manual positions created through Trade Planner.
+    /// </summary>
+    public bool IsAiGenerated { get; set; }
+
     // Link to originating signal (optional — positions can exist without signals)
     public Guid? TradeSignalId { get; set; }
     public TradeSignal? TradeSignal { get; set; }

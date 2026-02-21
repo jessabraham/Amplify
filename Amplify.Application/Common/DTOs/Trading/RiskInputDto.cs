@@ -9,6 +9,7 @@ public class RiskInputDto
     public decimal? Target2 { get; set; }
     public decimal PortfolioSize { get; set; }
     public decimal? RiskPercent { get; set; }
+    public decimal? PositionBudget { get; set; }
     public bool IsShort { get; set; }
 
     /// <summary>

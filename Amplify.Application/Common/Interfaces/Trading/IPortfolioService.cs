@@ -12,6 +12,7 @@ public interface IPortfolioService
     Task<Result<PositionDto>> OpenPositionAsync(PositionDto dto, string userId);
     Task<Result<PositionDto>> ClosePositionAsync(ClosePositionDto dto, string userId);
     Task<Result<PositionDto>> UpdateCurrentPriceAsync(Guid positionId, decimal currentPrice);
+    Task<Result<bool>> DeletePositionAsync(Guid positionId, string userId);
 
     // Portfolio summary
     Task<Result<PortfolioSummaryDto>> GetPortfolioSummaryAsync(string userId);

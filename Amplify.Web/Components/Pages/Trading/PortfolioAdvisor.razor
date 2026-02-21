@@ -1,0 +1,366 @@
+﻿@page "/portfolio-advisor"
+@rendermode InteractiveServer
+@inject PortfolioAdvisorApiClient AdvisorApi
+@inject SettingsApiClient SettingsApi
+@inject WatchlistApiClient WatchlistApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@using Amplify.Web.Services
+@using System.Text.Json
+
+<div class="fade-in">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h1><i class="ph-duotone ph-chart-pie-slice" style="margin-right: 8px; color: var(--accent-cyan);"></i>Portfolio Advisor</h1>
+        <button class="btn btn-primary" @onclick="RunAdvisor" disabled="@_loading">
+            @if (_loading)
+            {
+                <i class="ph ph-circle-notch" style="animation: spin 1s linear infinite; margin-right: 6px;"></i>
+                <span>Analyzing...</span>
+            }
+            else
+            {
+                <i class="ph-bold ph-brain" style="margin-right: 6px;"></i>
+                <span>Get AI Allocation Advice</span>
+            }
+        </button>
+    </div>
+
+    <!-- Portfolio Summary Bar -->
+    @if (_balance is not null)
+    {
+        <div class="stats-row" style="margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-bank" style="margin-right: 4px;"></i>Portfolio Value</div>
+                <div class="stat-value">@_balance.PortfolioValue.ToString("C0")</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>Cash Available</div>
+                <div class="stat-value" style="color: var(--accent-green);">@_balance.CashAvailable.ToString("C0")</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>Invested</div>
+                <div class="stat-value">@_balance.TotalInvested.ToString("C0")</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-stack" style="margin-right: 4px;"></i>Open Positions</div>
+                <div class="stat-value">@_balance.OpenPositionCount</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-binoculars" style="margin-right: 4px;"></i>Watchlist</div>
+                <div class="stat-value">@_watchlistCount</div>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="card" style="border-left: 3px solid var(--accent-red); margin-bottom: 16px;">
+            <span style="color: var(--accent-red);"><i class="ph-bold ph-warning" style="margin-right: 6px;"></i>@_error</span>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="card" style="text-align: center; padding: 60px;">
+            <i class="ph ph-circle-notch" style="font-size: 2.5rem; color: var(--accent-cyan); animation: spin 1s linear infinite;"></i>
+            <p style="color: var(--text-muted); margin-top: 16px; font-size: 1rem;">AI is analyzing your watchlist, positions, and market conditions...</p>
+            <p style="color: var(--text-muted); font-size: 0.8rem;">This may take up to 60 seconds with local Ollama.</p>
+        </div>
+    }
+
+    @if (_result is not null)
+    {
+        <!-- AI Summary -->
+        <div class="card" style="border-left: 3px solid var(--accent-cyan); margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <i class="ph-duotone ph-brain" style="font-size: 1.3rem; color: var(--accent-cyan);"></i>
+                <span style="font-weight: 700; color: var(--text-heading); font-size: 1rem;">AI Portfolio Assessment</span>
+                @if (!string.IsNullOrEmpty(_result.DiversificationScore))
+                {
+                    <span style="margin-left: auto; font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; background: @GetDiverseColor(_result.DiversificationScore); color: white;">
+                        Diversification: @_result.DiversificationScore
+                    </span>
+                }
+            </div>
+            <p style="color: var(--text-body); font-size: 0.9rem; line-height: 1.5;">@_result.Summary</p>
+
+            @if (_result.Warnings.Any())
+            {
+                <div style="margin-top: 12px;">
+                    @foreach (var warning in _result.Warnings)
+                    {
+                        <div style="font-size: 0.8rem; color: var(--accent-amber); margin-top: 4px;">
+                            <i class="ph-bold ph-warning" style="margin-right: 4px;"></i>@warning
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_result.TotalSuggestedAllocation > 0)
+            {
+                <div style="display: flex; gap: 20px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.8rem;">
+                    <span style="color: var(--text-muted);">Suggested deployment: <strong style="color: var(--accent-cyan);">@_result.TotalSuggestedAllocation.ToString("C0")</strong></span>
+                    <span style="color: var(--text-muted);">Cash retained: <strong style="color: var(--accent-green);">@_result.CashRetained.ToString("C0")</strong></span>
+                </div>
+            }
+        </div>
+
+        <!-- Allocation Cards -->
+        @if (_result.Allocations.Any())
+        {
+            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                <i class="ph-duotone ph-chart-pie" style="margin-right: 6px; color: var(--accent-cyan);"></i>Recommended Allocations
+            </div>
+
+            <div class="signal-grid">
+                @foreach (var alloc in _result.Allocations.OrderByDescending(a => a.SuggestedBudget))
+                {
+                    var isSkip = alloc.Skip;
+                    var dirClass = alloc.Direction.ToLower() == "short" ? "short" : "long";
+                    var confColor = alloc.Confidence switch
+                    {
+                                        "High" => "var(--accent-green)",
+                                        "Low" => "var(--accent-red)",
+                        _ => "var(--accent-amber)"
+                    };
+
+                    <div class="signal-card @dirClass" style="@(isSkip ? "opacity: 0.5;" : "")">
+                        <div class="signal-card-header">
+                            <span class="signal-asset">@alloc.Symbol</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                @if (!isSkip)
+                                {
+                                    <span class="signal-type-badge @dirClass">
+                                        @if (dirClass == "long")
+                                        {
+                                            <i class="ph-bold ph-trend-up" style="margin-right: 4px;"></i>
+                                        }
+                                        else
+                                        {
+
+                                            <i class="ph-bold ph-trend-down" style="margin-right: 4px;"></i>
+                                        }
+                                        @alloc.Direction
+                                    </span>
+                                }
+                                <span style="font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: @confColor; color: white;">@alloc.Confidence</span>
+                            </div>
+                        </div>
+
+                        @if (isSkip)
+                        {
+                            <div style="padding: 12px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                <i class="ph-light ph-skip-forward" style="margin-right: 4px;"></i>@(alloc.SkipReason ?? "Skipped")
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0;">
+                                <div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted);">Suggested Budget</div>
+                                    <div style="font-weight: 700; font-size: 1.2rem; color: var(--accent-cyan); font-family: 'JetBrains Mono', monospace;">@alloc.SuggestedBudget.ToString("C0")</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted);">% of Portfolio</div>
+                                    <div style="font-weight: 600; font-size: 1.2rem; font-family: 'JetBrains Mono', monospace;">@alloc.PortfolioPercent.ToString("F1")%</div>
+                                </div>
+                            </div>
+
+                            <div style="font-size: 0.8rem; color: var(--text-body); margin-bottom: 6px;">
+                                <i class="ph-light ph-lightbulb" style="margin-right: 4px; color: var(--accent-cyan);"></i>@alloc.Rationale
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(alloc.RiskNote))
+                            {
+                                <div style="font-size: 0.75rem; color: var(--accent-amber);">
+                                    <i class="ph-light ph-warning" style="margin-right: 4px;"></i>@alloc.RiskNote
+                                </div>
+                            }
+
+                            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+                                <a href="/planner?symbol=@alloc.Symbol&budget=@((int)alloc.SuggestedBudget)" class="btn btn-primary" style="font-size: 0.8rem; width: 100%; text-align: center;">
+                                    <i class="ph-bold ph-arrow-right" style="margin-right: 6px;"></i>Open in Trade Planner — @alloc.SuggestedBudget.ToString("C0")
+                                </a>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+    else if (!_loading && _hasRun)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-chart-pie-slice" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">No allocation advice generated yet.</p>
+        </div>
+    }
+    else if (!_loading)
+    {
+        <div class="card" style="text-align: center; padding: 48px;">
+            <i class="ph-thin ph-chart-pie-slice" style="font-size: 3rem; color: var(--text-muted);"></i>
+            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Click <strong>"Get AI Allocation Advice"</strong> to analyze your watchlist and get position sizing suggestions.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">The AI will consider your cash available, open positions, market regimes, and recent patterns.</p>
+        </div>
+    }
+
+    <!-- Advice History -->
+    @if (_history.Any())
+    {
+        <div style="margin-top: 24px;">
+            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                <i class="ph-duotone ph-clock-counter-clockwise" style="margin-right: 6px; color: var(--text-muted);"></i>Past Advice (@_history.Count)
+            </div>
+
+            @foreach (var item in _history)
+            {
+                var isExpanded = _expandedHistoryId == item.Id;
+                <div class="card" style="margin-bottom: 8px; cursor: pointer;" @onclick="() => ToggleHistory(item.Id)">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">@item.CreatedAt.ToLocalTime().ToString("MMM dd, h:mm tt")</span>
+                            <span style="font-size: 0.8rem; color: var(--text-body);">@item.Summary</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            @if (!string.IsNullOrEmpty(item.DiversificationScore))
+                            {
+                                <span style="font-size: 0.65rem; padding: 2px 8px; border-radius: 10px; background: @GetDiverseColor(item.DiversificationScore); color: white;">@item.DiversificationScore</span>
+                            }
+                            <span style="font-size: 0.8rem; font-weight: 600; color: var(--accent-cyan);">@item.TotalSuggestedAllocation.ToString("C0")</span>
+                            <i class="ph @(isExpanded ? "ph-caret-up" : "ph-caret-down")" style="color: var(--text-muted);"></i>
+                        </div>
+                    </div>
+
+                    @if (isExpanded)
+                    {
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.8rem;">
+                            <div style="display: flex; gap: 20px; color: var(--text-muted); margin-bottom: 8px;">
+                                <span>Cash: @item.CashAvailable.ToString("C0")</span>
+                                <span>Invested: @item.TotalInvested.ToString("C0")</span>
+                                <span>Positions: @item.OpenPositionCount</span>
+                                <span>Watchlist: @item.WatchlistCount</span>
+                                <span>Allocations: @item.TotalAllocations</span>
+                            </div>
+                            @{
+                                var allocations = ParseAllocations(item.ResponseJson);
+                            }
+                            @if (allocations.Any())
+                            {
+                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 8px;">
+                                    @foreach (var a in allocations)
+                                    {
+                                        <div style="padding: 8px 12px; border-radius: 6px; background: var(--bg-card-hover);">
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <span style="font-weight: 600;">@a.Symbol</span>
+                                                <span style="color: var(--accent-cyan); font-weight: 600;">@a.SuggestedBudget.ToString("C0")</span>
+                                            </div>
+                                            <div style="font-size: 0.7rem; color: var(--text-muted);">@a.Direction · @a.Confidence</div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private PortfolioBalanceData? _balance;
+    private PortfolioAllocationResult? _result;
+    private bool _loading;
+    private bool _loaded;
+    private bool _hasRun;
+    private string? _error;
+    private int _watchlistCount;
+
+    // History
+    private List<AdviceHistoryItem> _history = new();
+    private Guid? _expandedHistoryId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded) return;
+        _loaded = true;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (!state.User.Identity?.IsAuthenticated ?? true)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _balance = await SettingsApi.GetPortfolioBalanceAsync();
+            var watchlist = await WatchlistApi.GetWatchlistAsync();
+            _watchlistCount = watchlist.Count(w => w.IsActive);
+            _history = await AdvisorApi.GetAdviceHistoryAsync(10);
+        }
+        catch { }
+
+        StateHasChanged();
+    }
+
+    private async Task RunAdvisor()
+    {
+        _loading = true;
+        _error = null;
+        _result = null;
+        _hasRun = true;
+        StateHasChanged();
+
+        try
+        {
+            _result = await AdvisorApi.GetAllocationAdviceAsync();
+            if (_result is null)
+                _error = "Failed to get AI advice. Make sure Ollama is running and you have symbols in your watchlist.";
+
+            // Refresh balance + history
+            _balance = await SettingsApi.GetPortfolioBalanceAsync();
+            _history = await AdvisorApi.GetAdviceHistoryAsync(10);
+        }
+        catch (TaskCanceledException)
+        {
+            _error = "Request timed out. Ollama may be processing — try again.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string GetDiverseColor(string score) => score switch
+    {
+        "Good" => "var(--accent-green)",
+        "Poor" => "var(--accent-red)",
+        _ => "var(--accent-amber)"
+    };
+
+    private void ToggleHistory(Guid id)
+    {
+        _expandedHistoryId = _expandedHistoryId == id ? null : id;
+    }
+
+    private static List<AllocationSuggestion> ParseAllocations(string responseJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseJson);
+            if (doc.RootElement.TryGetProperty("allocations", out var arr))
+            {
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                return JsonSerializer.Deserialize<List<AllocationSuggestion>>(arr.GetRawText(), options) ?? new();
+            }
+        }
+        catch { }
+        return new();
+    }
+}

@@ -43,11 +43,37 @@ public class AdvisoryApiClient
         var result = await response.Content.ReadFromJsonAsync<ChatResponse>();
         return result?.Response;
     }
+
+    public async Task<StrategyAnalysisResponse?> GetStrategyAnalysisAsync(string? focusArea = null)
+    {
+        AttachToken();
+        var response = await _http.PostAsJsonAsync("api/StrategyAdvisor/analyze",
+            new { FocusArea = focusArea });
+
+        if (!response.IsSuccessStatusCode) return null;
+
+        return await response.Content.ReadFromJsonAsync<StrategyAnalysisResponse>();
+    }
 }
 
 public class ChatResponse
 {
     public string Response { get; set; } = "";
+}
+
+public class StrategyAnalysisResponse
+{
+    public string Analysis { get; set; } = "";
+    public DateTime GeneratedAt { get; set; }
+    public int TradesAnalyzed { get; set; }
+    public int PatternsAnalyzed { get; set; }
+    public decimal OverallWinRate { get; set; }
+    public decimal AvgRMultiple { get; set; }
+    public decimal TotalPnL { get; set; }
+    public string BestTimeframe { get; set; } = "";
+    public string WorstTimeframe { get; set; } = "";
+    public string BestRegime { get; set; } = "";
+    public string WorstRegime { get; set; } = "";
 }
 
 public class SignalAnalysisDto

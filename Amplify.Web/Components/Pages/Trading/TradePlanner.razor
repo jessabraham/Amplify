@@ -7,6 +7,7 @@
 @inject PortfolioApiClient PortfolioApi
 @inject AdvisoryApiClient AdvisoryApi
 @inject SimulationApiClient SimApi
+@inject SettingsApiClient SettingsApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
 @using Amplify.Application.Common.DTOs.Trading
@@ -118,61 +119,67 @@
             </div>
 
             <!-- Context Layers -->
-            @if (_scanResult.Context is not null)
+            @if (GetActiveContext() is ContextData ctx)
             {
-                var ctx = _scanResult.Context;
                 <div class="card" style="margin-top: 12px;">
                     <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 10px; font-size: 0.85rem;">
                         <i class="ph-duotone ph-chart-line-up" style="margin-right: 6px;"></i>Market Context
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 400; margin-left: 6px;">(@(ctx.Timeframe) timeframe@(ctx.KeyLevels?.Any() == true ? " — key levels from Daily" : ""))</span>
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 0.78rem;">
                         <!-- Volume -->
                         <div style="text-align: center;">
                             <div style="color: var(--text-muted); font-size: 0.7rem;">Volume</div>
-                            @{
-                                var volColor = ctx.VolumeProfile == "Breakout" ? "var(--accent-green)" : ctx.VolumeProfile == "Low" ? "var(--accent-red)" : "var(--text-heading)";
-                            }
-                            <div style="font-weight: 700; color: @volColor;">@ctx.VolumeProfile (@(ctx.VolumeRatio)x)</div>
+                            <div style="font-weight: 700; color: @(GetVolumeColor(ctx.VolumeProfile));">
+                                @(string.IsNullOrEmpty(ctx.VolumeProfile) ? "N/A" : $"{ctx.VolumeProfile} ({ctx.VolumeRatio:F1}x)")
+                            </div>
                         </div>
                         <!-- MA Alignment -->
                         <div style="text-align: center;">
                             <div style="color: var(--text-muted); font-size: 0.7rem;">MA Stack</div>
-                            @{
-                                var maColor = ctx.MAAlignment.Contains("Bullish") ? "var(--accent-green)" : ctx.MAAlignment.Contains("Bearish") ? "var(--accent-red)" : "var(--text-heading)";
-                            }
-                            <div style="font-weight: 700; color: @maColor;">@ctx.MAAlignment</div>
+                            <div style="font-weight: 700; color: @(GetMAColor(ctx.MAAlignment));">
+                                @(string.IsNullOrEmpty(ctx.MAAlignment) ? "N/A" : ctx.MAAlignment)
+                            </div>
                         </div>
                         <!-- RSI -->
                         <div style="text-align: center;">
                             <div style="color: var(--text-muted); font-size: 0.7rem;">RSI (14)</div>
-                            @{
-                                var rsiZoneColor = ctx.RSIZone == "Oversold" ? "var(--accent-green)" : ctx.RSIZone == "Overbought" ? "var(--accent-red)" : "var(--text-heading)";
-                            }
-                            <div style="font-weight: 700; color: @rsiZoneColor;">@ctx.RSI?.ToString("F0") (@ctx.RSIZone)</div>
+                            <div style="font-weight: 700; color: @(GetRSIColor(ctx.RSIZone));">
+                                @(ctx.RSI.HasValue && ctx.RSI.Value > 0 ? $"{ctx.RSI.Value:F0} ({ctx.RSIZone})" : "N/A")
+                            </div>
                         </div>
                         <!-- ATR -->
                         <div style="text-align: center;">
                             <div style="color: var(--text-muted); font-size: 0.7rem;">Volatility (ATR)</div>
-                            <div style="font-weight: 700; color: var(--text-heading);">@ctx.ATRPercent?.ToString("F2")%</div>
+                            <div style="font-weight: 700; color: var(--text-heading);">
+                                @(ctx.ATRPercent.HasValue && ctx.ATRPercent.Value > 0 ? $"{ctx.ATRPercent.Value:F2}%" : "N/A")
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Key Levels -->
-                    @if (ctx.NearestSupport.HasValue || ctx.NearestResistance.HasValue)
+                    <!-- Key Levels (from active context or Daily fallback) -->
+                    @{
+                        var dailyCtx = _scanResult.TimeframeContexts?.FirstOrDefault(c => c.Timeframe == "Daily") ?? _scanResult.Context;
+                        var supportVal = ctx.NearestSupport ?? dailyCtx?.NearestSupport;
+                        var resistVal = ctx.NearestResistance ?? dailyCtx?.NearestResistance;
+                        var distSupport = ctx.DistToSupportPct ?? dailyCtx?.DistToSupportPct;
+                        var distResist = ctx.DistToResistancePct ?? dailyCtx?.DistToResistancePct;
+                    }
+                    @if (supportVal.HasValue || resistVal.HasValue)
                     {
                         <div style="display: flex; gap: 20px; margin-top: 10px; font-size: 0.75rem;">
-                            @if (ctx.NearestSupport.HasValue)
+                            @if (supportVal.HasValue)
                             {
                                 <span style="color: var(--accent-green);">
-                                    <i class="ph-bold ph-arrow-down" style="margin-right: 3px;"></i>Support: @ctx.NearestSupport?.ToString("C2")
-                                    <span style="opacity: 0.6;">(@ctx.DistToSupportPct?.ToString("F1")% below)</span>
+                                    <i class="ph-bold ph-arrow-down" style="margin-right: 3px;"></i>Support: @FormatPrice(supportVal.Value)
+                                    <span style="opacity: 0.6;">(@distSupport?.ToString("F1")% below)</span>
                                 </span>
                             }
-                            @if (ctx.NearestResistance.HasValue)
+                            @if (resistVal.HasValue)
                             {
                                 <span style="color: var(--accent-red);">
-                                    <i class="ph-bold ph-arrow-up" style="margin-right: 3px;"></i>Resistance: @ctx.NearestResistance?.ToString("C2")
-                                    <span style="opacity: 0.6;">(@ctx.DistToResistancePct?.ToString("F1")% above)</span>
+                                    <i class="ph-bold ph-arrow-up" style="margin-right: 3px;"></i>Resistance: @FormatPrice(resistVal.Value)
+                                    <span style="opacity: 0.6;">(@distResist?.ToString("F1")% above)</span>
                                 </span>
                             }
                             @if (ctx.DistFromSMA200Pct.HasValue)
@@ -190,7 +197,7 @@
             <div class="card" style="margin-top: 12px;">
                 <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
                     <i class="ph-duotone ph-eye" style="margin-right: 6px;"></i>@_scanResult.TotalPatterns Patterns Found
-                    <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 8px;">Current price: @(_scanResult.CurrentPrice.ToString("C2"))</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 8px;">Current price: @(FormatPrice(_scanResult.CurrentPrice))</span>
                 </div>
 
                 @if (_scanResult.Patterns.Count == 0)
@@ -199,17 +206,48 @@
                 }
                 else
                 {
+                    <!-- Timeframe tabs -->
+                    <div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+                        @{
+                            var tabList = GetPatternTabs();
+                        }
+                        @foreach (var tab in tabList)
+                        {
+                            var isActive = _patternTab == tab.Name;
+                            var tabColor = tab.Color;
+                            <button style="padding: 4px 12px; font-size: 0.75rem; border-radius: 6px; border: 1px solid @(isActive? tabColor : "var(--border)"); background: @(isActive ? "rgba(255,255,255,0.08)" : "transparent"); color: @(isActive? tabColor : "var(--text-muted)"); cursor: pointer; font-weight: @(isActive ? "700" : "500"); transition: all 0.2s;"
+                                    @onclick="() => { _patternTab = tab.Name; }">
+                                @tab.Name <span style="opacity: 0.7;">(@tab.Count)</span>
+                            </button>
+                        }
+                    </div>
+
                     <div style="display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto;">
-                        @foreach (var p in _scanResult.Patterns)
+                        @{
+                            var filtered = GetFilteredPatterns(); var bestPerTf = GetBestPerTimeframe();
+                        }
+                        @foreach (var p in filtered)
                         {
                             var isSelected = ReferenceEquals(_selectedPattern, p);
+                            var isBestInTf = bestPerTf.ContainsKey(p.Timeframe) && bestPerTf[p.Timeframe] == p.PatternName;
                             var dirColor = p.Direction == "Bullish" ? "var(--accent-green)" : p.Direction == "Bearish" ? "var(--accent-red)" : "var(--text-muted)";
-                            var tfBadgeColor = p.Timeframe == "Weekly" ? "rgba(123,97,255,0.3)" : p.Timeframe == "4H" ? "rgba(255,255,255,0.05)" : "rgba(0,200,200,0.15)";
-                            <div style="background: @(isSelected ? "var(--surface-hover)" : "transparent"); border: 1px solid @(isSelected ? "var(--accent-cyan)" : "var(--border)"); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;"
+                            var tfBadgeColor = p.Timeframe switch
+                            {
+                                                    "1H" => "rgba(245,158,11,0.25)",
+                                                    "4H" => "rgba(255,255,255,0.08)",
+                                                    "Daily" => "rgba(0,200,200,0.15)",
+                                                    "Weekly" => "rgba(123,97,255,0.3)",
+                                _ => "rgba(0,200,200,0.15)"
+                            };
+                            <div style="background: @(isSelected ? "var(--surface-hover)" : isBestInTf ? "rgba(6,182,212,0.04)" : "transparent"); border: 1px solid @(isSelected ? "var(--accent-cyan)" : isBestInTf ? "rgba(6,182,212,0.25)" : "var(--border)"); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;"
                                  @onclick="() => SelectPattern(p)">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span style="font-size: 0.6rem; padding: 2px 6px; border-radius: 3px; background: @tfBadgeColor; font-weight: 600;">@p.Timeframe</span>
+                                        @if (isBestInTf)
+                                        {
+                                            <span style="font-size: 0.55rem; padding: 2px 6px; border-radius: 3px; background: rgba(6,182,212,0.2); color: var(--accent-cyan); font-weight: 700; letter-spacing: 0.5px;">★ TOP PICK</span>
+                                        }
                                         <span style="font-weight: 600; color: var(--text-heading);">@p.PatternName</span>
                                         <span style="font-size: 0.7rem; color: @dirColor; font-weight: 600;">@p.Direction</span>
                                         @if (!string.IsNullOrEmpty(p.AIGrade))
@@ -220,7 +258,7 @@
                                     <span style="font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan);">@(p.Confidence.ToString("F0"))%</span>
                                 </div>
                                 <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
-                                    Entry @(p.SuggestedEntry.ToString("C2")) · Stop @(p.SuggestedStop.ToString("C2")) · Target @(p.SuggestedTarget.ToString("C2"))
+                                    Entry @(FormatPrice(p.SuggestedEntry)) · Stop @(FormatPrice(p.SuggestedStop)) · Target @(FormatPrice(p.SuggestedTarget))
                                 </div>
                                 @if (!string.IsNullOrEmpty(p.Description))
                                 {
@@ -230,10 +268,16 @@
                         }
                     </div>
 
-                    <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
-                        <button class="btn btn-primary" disabled="@(_selectedPattern is null)" @onclick="GoToStep2">
-                            Continue with Selected Pattern <i class="ph-bold ph-arrow-right" style="margin-left: 4px;"></i>
+                    <div style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="btn btn-secondary" @onclick="SkipToTradeSetup">
+                            Skip to Trade Setup <i class="ph-bold ph-arrow-right" style="margin-left: 4px;"></i>
                         </button>
+                        @if (_selectedPattern is not null)
+                        {
+                            <button class="btn btn-primary" @onclick="GoToStep2">
+                                Continue with @_selectedPattern.PatternName <i class="ph-bold ph-arrow-right" style="margin-left: 4px;"></i>
+                            </button>
+                        }
                     </div>
                 }
             </div>
@@ -250,8 +294,45 @@
                 <i class="ph-duotone ph-robot" style="margin-right: 6px; color: var(--accent-cyan);"></i>Step 2: AI Analysis
             </div>
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
-                AI is evaluating the pattern, regime, and suggested levels for @_symbol.
+                AI is evaluating the @((_selectedPattern is not null) ? "pattern, " : "")regime, and suggested levels for @_symbol.
             </div>
+
+            <!-- Selected pattern or scan context -->
+            @if (_selectedPattern is not null)
+            {
+                var tfColor = _selectedPattern.Timeframe switch
+                {
+                                "1H" => "var(--accent-amber)",
+                                "4H" => "rgba(255,255,255,0.7)",
+                                "Daily" => "var(--accent-cyan)",
+                                "Weekly" => "rgba(123,97,255,0.9)",
+                    _ => "var(--text-muted)"
+                };
+                var dirColor = _selectedPattern.Direction == "Bullish" ? "var(--accent-green)" : _selectedPattern.Direction == "Bearish" ? "var(--accent-red)" : "var(--text-muted)";
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px; background: var(--surface-hover); border-radius: 8px; border-left: 3px solid @tfColor;">
+                    <span style="font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08); font-weight: 700; color: @tfColor;">@_selectedPattern.Timeframe</span>
+                    <span style="font-weight: 600; color: var(--text-heading);">@_selectedPattern.PatternName</span>
+                    <span style="font-size: 0.75rem; font-weight: 600; color: @dirColor;">@_selectedPattern.Direction</span>
+                    <span style="font-size: 0.75rem; color: var(--accent-cyan); font-weight: 700;">@(_selectedPattern.Confidence.ToString("F0"))%</span>
+                </div>
+            }
+            else if (_scanResult is not null)
+            {
+                var dirColor2 = _scanResult.DirectionAlignment.Contains("Bullish") ? "var(--accent-green)" : _scanResult.DirectionAlignment.Contains("Bearish") ? "var(--accent-red)" : "var(--text-muted)";
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px; background: var(--surface-hover); border-radius: 8px; border-left: 3px solid var(--text-muted);">
+                    <span style="font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08); font-weight: 600; color: var(--text-muted);">NO PATTERN</span>
+                    <span style="font-weight: 600; color: var(--text-heading);">@_symbol</span>
+                    <span style="font-size: 0.12rem; color: var(--border);">|</span>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">Regime:</span>
+                    <span style="font-size: 0.75rem; font-weight: 600; color: var(--accent-cyan);">@_scanResult.CombinedRegime</span>
+                    <span style="font-size: 0.12rem; color: var(--border);">|</span>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">Direction:</span>
+                    <span style="font-size: 0.75rem; font-weight: 600; color: @dirColor2;">@_scanResult.DirectionAlignment</span>
+                    <span style="font-size: 0.12rem; color: var(--border);">|</span>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">Patterns:</span>
+                    <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-heading);">@_scanResult.TotalPatterns found</span>
+                </div>
+            }
 
             @if (_aiLoading)
             {
@@ -290,18 +371,18 @@
                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">AI Suggested Levels:</div>
                     <div style="display: flex; gap: 12px; margin-bottom: 12px;">
                         <div style="background: var(--surface-hover); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem;">
-                            Entry: <span style="font-weight: 700;">@(ai.RecommendedEntry.Value.ToString("C2"))</span>
+                            Entry: <span style="font-weight: 700;">@(FormatPrice(ai.RecommendedEntry.Value))</span>
                         </div>
                         @if (ai.RecommendedStop.HasValue)
                         {
                             <div style="background: var(--surface-hover); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem;">
-                                Stop: <span style="font-weight: 700; color: var(--accent-red);">@(ai.RecommendedStop.Value.ToString("C2"))</span>
+                                Stop: <span style="font-weight: 700; color: var(--accent-red);">@(FormatPrice(ai.RecommendedStop.Value))</span>
                             </div>
                         }
                         @if (ai.RecommendedTarget.HasValue)
                         {
                             <div style="background: var(--surface-hover); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem;">
-                                Target: <span style="font-weight: 700; color: var(--accent-green);">@(ai.RecommendedTarget.Value.ToString("C2"))</span>
+                                Target: <span style="font-weight: 700; color: var(--accent-green);">@(FormatPrice(ai.RecommendedTarget.Value))</span>
                             </div>
                         }
                     </div>
@@ -331,15 +412,24 @@
     @if (_step == 3)
     {
         <div class="card">
-            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 4px;">
-                <i class="ph-duotone ph-sliders" style="margin-right: 6px; color: var(--accent-cyan);"></i>Step 3: Set Trade Levels
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                <i class="ph-duotone ph-sliders" style="color: var(--accent-cyan); font-size: 1.2rem;"></i>
+                <span style="font-weight: 600; color: var(--text-heading);">Step 3: Set Trade Levels</span>
+                <span style="font-weight: 700; font-size: 1.1rem; color: var(--accent-cyan); margin-left: auto;">@_symbol</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">@(IsCrypto(_symbol) ? "Crypto" : "Stock")</span>
             </div>
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
-                Confirm or adjust entry, stop loss, and target prices for @_symbol. Pre-filled from pattern + AI suggestions.
+                Confirm or adjust entry, stop loss, and target prices. Pre-filled from pattern + AI suggestions.
             </div>
 
-            <div style="display: flex; flex-direction: column; gap: 12px; max-width: 500px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <!-- Cash Available info bar -->
+            <div style="display: flex; align-items: center; gap: 20px; padding: 10px 14px; border-radius: 6px; background: var(--bg-card-hover); margin-bottom: 16px; font-size: 0.8rem;">
+                <span style="color: var(--text-muted);"><i class="ph-light ph-bank" style="margin-right: 4px;"></i>Cash Available:</span>
+                <span style="font-weight: 700; color: var(--accent-green);">@_cashAvailable.ToString("C0")</span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px; max-width: 600px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                     <div>
                         <label style="font-size: 0.75rem; color: var(--text-muted);">Direction</label>
                         <select class="form-input" @bind="_tradeDirection">
@@ -348,11 +438,59 @@
                         </select>
                     </div>
                     <div>
-                        <label style="font-size: 0.75rem; color: var(--text-muted);">Portfolio Size ($)</label>
-                        <input type="number" class="form-input" step="1000" @bind="_portfolioSize" />
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Position Budget ($)</label>
+                        <input type="number" class="form-input" step="500" @bind="_positionBudget" />
+                        @if (_cashAvailable > 0 && _scanResult?.AIAnalysis is not null)
+                        {
+                            var conf = _scanResult.AIAnalysis.OverallConfidence;
+                            <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 3px;">
+                                <i class="ph-light ph-brain" style="margin-right: 3px;"></i>Based on @(conf.ToString("F0"))% AI confidence · @(_scanResult.CombinedRegime) regime
+                            </div>
+                        }
+                        else if (_cashAvailable > 0)
+                        {
+                            <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 3px;">
+                                <i class="ph-light ph-lightbulb" style="margin-right: 3px;"></i>Default 5% of cash. Run scan for AI-driven sizing.
+                            </div>
+                        }
+                    </div>
+                    <div>
+                        <label style="font-size: 0.75rem; color: var(--text-muted);">Risk %</label>
+                        <input type="number" class="form-input" step="0.5" @bind="_riskPercent" />
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+
+                <!-- Estimated position size preview -->
+                @if (_entryPrice > 0 && _positionBudget > 0)
+                {
+                    var isCrypto = IsCrypto(_symbol);
+                    var estUnits = isCrypto
+                    ? Math.Round(_positionBudget / _entryPrice, 6)
+                    : Math.Floor(_positionBudget / _entryPrice);
+                    var estCost = estUnits * _entryPrice;
+                    var riskAmount = _positionBudget * _riskPercent / 100m;
+                    var exceedsCash = _positionBudget > _cashAvailable;
+                    var portfolioPct = _cashAvailable > 0 ? _positionBudget / _cashAvailable * 100m : 0;
+                    <div style="margin-top: 4px; padding: 10px 14px; border-radius: 6px; background: var(--bg-card-hover); font-size: 0.78rem; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                        <span style="color: var(--text-muted);">
+                            <i class="ph-duotone ph-calculator" style="margin-right: 4px;"></i>Est. Position:
+                        </span>
+                        <span style="font-weight: 700; color: var(--text-heading);">@(isCrypto? estUnits.ToString("N6") : estUnits.ToString("N0")) @(isCrypto ? "units" : "shares")</span>
+                        <span style="color: var(--text-muted);">×</span>
+                        <span style="font-weight: 600;">@FormatPrice(_entryPrice)</span>
+                        <span style="color: var(--text-muted);">=</span>
+                        <span style="font-weight: 700; color: @(exceedsCash ? "var(--accent-red)" : "var(--accent-cyan)");">@estCost.ToString("C0")</span>
+                        <span style="color: var(--text-muted);">(@(portfolioPct.ToString("F1"))% of cash) · max risk: @riskAmount.ToString("C0")</span>
+                        @if (exceedsCash)
+                        {
+                            <span style="color: var(--accent-red); font-weight: 600;">
+                                <i class="ph-bold ph-warning" style="margin-right: 3px;"></i>Exceeds cash available
+                            </span>
+                        }
+                    </div>
+                }
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
                         <label style="font-size: 0.75rem; color: var(--text-muted);">Entry Price</label>
                         <input type="number" class="form-input" step="0.01" @bind="_entryPrice" />
@@ -360,10 +498,6 @@
                     <div>
                         <label style="font-size: 0.75rem; color: var(--text-muted);">Stop Loss</label>
                         <input type="number" class="form-input" step="0.01" @bind="_stopLoss" />
-                    </div>
-                    <div>
-                        <label style="font-size: 0.75rem; color: var(--text-muted);">Risk %</label>
-                        <input type="number" class="form-input" step="0.5" @bind="_riskPercent" />
                     </div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -433,8 +567,8 @@
             <!-- Key Numbers -->
             <div class="stats-row" style="margin-top: 16px; margin-bottom: 16px;">
                 <div class="stat-card">
-                    <div class="stat-label">Shares</div>
-                    <div class="stat-value">@(_riskResult.ShareCount.ToString("N0"))</div>
+                    <div class="stat-label">@(IsCrypto(_symbol) ? "Units" : "Shares")</div>
+                    <div class="stat-value">@(IsCrypto(_symbol) ? _riskResult.ShareCount.ToString("N6") : _riskResult.ShareCount.ToString("N0"))</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Position Value</div>
@@ -485,7 +619,7 @@
                     <i class="ph-duotone ph-check-circle" style="font-size: 3rem; color: var(--accent-green);"></i>
                     <h2 style="margin-top: 12px; color: var(--text-heading);">Trade Executed!</h2>
                     <p style="color: var(--text-muted); margin-top: 8px;">
-                        @_symbol · @_tradeDirection · @(_riskResult?.ShareCount.ToString("N0")) shares @@ @(_entryPrice.ToString("C2"))
+                        @_symbol · @_tradeDirection · @(IsCrypto(_symbol) ? _riskResult?.ShareCount.ToString("N6") : _riskResult?.ShareCount.ToString("N0")) @(IsCrypto(_symbol) ? "units" : "shares") @@ @FormatPrice(_entryPrice)
                     </p>
                     <div style="display: flex; justify-content: center; gap: 12px; margin-top: 20px;">
                         <a href="/portfolio" class="btn btn-primary">
@@ -517,9 +651,14 @@
     [Parameter]
     public string? Symbol { get; set; }
 
+    [SupplyParameterFromQuery]
+    [Parameter]
+    public decimal? Budget { get; set; }
+
     // Step 1: Scan
     private bool _scanning;
     private ScanResultData? _scanResult;
+    private string _patternTab = "All";
     // Regime is now part of _scanResult (CombinedRegime)
     private ScannedPatternDto? _selectedPattern;
 
@@ -535,6 +674,8 @@
     private decimal? _target2;
     private decimal _riskPercent = 2.0m;
     private decimal _portfolioSize = 100_000m;
+    private decimal _cashAvailable = 100_000m;
+    private decimal _positionBudget = 5_000m;
 
     // Step 4: Risk
     private bool _calculating;
@@ -557,6 +698,19 @@
             Nav.NavigateTo("/login");
             return;
         }
+
+        // Load user's portfolio balance to set correct portfolio size
+        try
+        {
+            var balance = await SettingsApi.GetPortfolioBalanceAsync();
+            if (balance is not null)
+            {
+                _cashAvailable = balance.CashAvailable > 0 ? balance.CashAvailable : balance.StartingCapital;
+                _portfolioSize = _cashAvailable;
+                _positionBudget = Budget ?? CalculateRecommendedBudget();
+            }
+        }
+        catch { }
 
         // Auto-scan if symbol passed via query string
         if (!string.IsNullOrWhiteSpace(Symbol))
@@ -586,9 +740,145 @@
             // Multi-timeframe scan (4H + Daily + Weekly) with AI enabled
             // Regime is now computed per-timeframe and combined inside the scan
             _scanResult = await ScannerApi.ScanSymbolAsync(_symbol.ToUpper(), 40, "All", "Daily", true);
+
+            if (_scanResult?.Patterns != null)
+            {
+                Console.WriteLine($"📊 UI received {_scanResult.Patterns.Count} patterns: " +
+                    string.Join(", ", _scanResult.Patterns.GroupBy(p => p.Timeframe).Select(g => $"{g.Key}={g.Count()}")));
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _scanning = false; }
+    }
+
+    private List<(string Name, int Count, string Color)> GetPatternTabs()
+    {
+        if (_scanResult is null) return new();
+        return new List<(string Name, int Count, string Color)>
+        {
+            ("All", _scanResult.Patterns.Count, "var(--text-heading)"),
+            ("1H", _scanResult.Patterns.Count(p => p.Timeframe == "1H"), "var(--accent-amber)"),
+            ("4H", _scanResult.Patterns.Count(p => p.Timeframe == "4H"), "rgba(255,255,255,0.6)"),
+            ("Daily", _scanResult.Patterns.Count(p => p.Timeframe == "Daily"), "var(--accent-cyan)"),
+            ("Weekly", _scanResult.Patterns.Count(p => p.Timeframe == "Weekly"), "rgba(123,97,255,0.9)")
+        };
+    }
+
+    private List<ScannedPatternDto> GetFilteredPatterns()
+    {
+        if (_scanResult is null) return new();
+        var patterns = _patternTab == "All"
+            ? _scanResult.Patterns
+            : _scanResult.Patterns.Where(p => p.Timeframe == _patternTab);
+        return patterns.OrderByDescending(p => p.Confidence).ToList();
+    }
+
+    private Dictionary<string, string> GetBestPerTimeframe()
+    {
+        if (_scanResult is null) return new();
+        return _scanResult.Patterns
+            .GroupBy(p => p.Timeframe)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(p => p.Confidence).First().PatternName
+            );
+    }
+
+    private static string FormatPrice(decimal price)
+    {
+        if (price == 0) return "$0";
+        if (price < 0.01m) return price.ToString("C6");
+        if (price < 1m) return price.ToString("C4");
+        if (price < 10m) return price.ToString("C3");
+        return price.ToString("C2");
+    }
+
+    private static string GetVolumeColor(string? profile) => profile switch
+    {
+        "Breakout" => "var(--accent-green)",
+        "Low" => "var(--accent-red)",
+        _ => "var(--text-heading)"
+    };
+
+    private static string GetMAColor(string? alignment) =>
+        alignment?.Contains("Bullish") == true ? "var(--accent-green)" :
+        alignment?.Contains("Bearish") == true ? "var(--accent-red)" :
+        "var(--text-heading)";
+
+    private static string GetRSIColor(string? zone) => zone switch
+    {
+        "Oversold" => "var(--accent-green)",
+        "Overbought" => "var(--accent-red)",
+        _ => "var(--text-heading)"
+    };
+
+    private static bool IsCrypto(string symbol) =>
+        symbol.EndsWith("USD", StringComparison.OrdinalIgnoreCase) &&
+        new[] { "BTC", "ETH", "SOL", "DOGE", "XRP", "ADA", "AVAX", "DOT", "MATIC", "LINK", "SHIB", "LTC" }
+            .Any(c => symbol.StartsWith(c, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Calculate recommended position budget based on AI confidence and pattern strength.
+    /// Higher confidence = larger allocation. Adjusted for regime and asset volatility.
+    /// </summary>
+    private decimal CalculateRecommendedBudget()
+    {
+        if (_cashAvailable <= 0) return 5_000m;
+
+        // Base allocation from AI confidence (0-100 → 1-10% of cash)
+        var aiConfidence = _scanResult?.AIAnalysis?.OverallConfidence ?? 50m;
+        var patternConfidence = _selectedPattern?.Confidence ?? 50m;
+
+        // Blend AI + pattern confidence
+        var blendedConfidence = (aiConfidence * 0.6m) + (patternConfidence * 0.4m);
+
+        // Map confidence to allocation %:
+        //   50% confidence → 2% of cash
+        //   70% confidence → 5% of cash
+        //   90% confidence → 8% of cash
+        //  100% confidence → 10% of cash
+        var allocationPct = Math.Max(1m, Math.Min(10m, blendedConfidence / 10m));
+
+        // Regime adjustment
+        var regime = _scanResult?.CombinedRegime ?? "";
+        if (regime.Contains("Choppy", StringComparison.OrdinalIgnoreCase))
+            allocationPct *= 0.6m;  // reduce in choppy markets
+        else if (regime.Contains("Trending", StringComparison.OrdinalIgnoreCase))
+            allocationPct *= 1.1m;  // slight boost in trending
+
+        // Crypto volatility discount
+        if (IsCrypto(_symbol))
+            allocationPct *= 0.7m;
+
+        var recommended = Math.Round(_cashAvailable * allocationPct / 100m, 0);
+
+        // Floor: at least $500 or one unit of the asset
+        recommended = Math.Max(recommended, Math.Max(500m, _entryPrice > 0 ? _entryPrice : 0));
+
+        // Ceiling: never exceed 25% of cash
+        recommended = Math.Min(recommended, _cashAvailable * 0.25m);
+
+        return recommended;
+    }
+
+    /// <summary>
+    /// Returns the market context matching the currently selected pattern tab.
+    /// Falls back to Daily if no tab-specific context exists, then to the default Context.
+    /// </summary>
+    private ContextData? GetActiveContext()
+    {
+        if (_scanResult is null) return null;
+
+        // If timeframe contexts are available, pick the one matching the tab
+        if (_scanResult.TimeframeContexts?.Any() == true)
+        {
+            var targetTf = _patternTab == "All" ? "Daily" : _patternTab;
+            var match = _scanResult.TimeframeContexts.FirstOrDefault(c => c.Timeframe == targetTf);
+            if (match is not null) return match;
+        }
+
+        // Fallback to the default Daily context
+        return _scanResult.Context;
     }
 
     private void SelectPattern(ScannedPatternDto pattern)
@@ -598,21 +888,64 @@
 
     private void GoToStep2()
     {
-        if (_selectedPattern is null) return;
+        if (_selectedPattern is not null)
+        {
+            // Pre-fill levels from selected pattern
+            _entryPrice = _selectedPattern.SuggestedEntry;
+            _stopLoss = _selectedPattern.SuggestedStop;
+            _target1 = _selectedPattern.SuggestedTarget;
+            _tradeDirection = _selectedPattern.Direction == "Bearish" ? "Short" : "Long";
+        }
 
-        // Pre-fill levels from pattern
-        _entryPrice = _selectedPattern.SuggestedEntry;
-        _stopLoss = _selectedPattern.SuggestedStop;
-        _target1 = _selectedPattern.SuggestedTarget;
-        _tradeDirection = _selectedPattern.Direction == "Bearish" ? "Short" : "Long";
-
-        // Override with AI suggestions if available
+        // Override with AI suggestions if available and valid (non-zero)
         if (_scanResult?.AIAnalysis is not null)
         {
             var ai = _scanResult.AIAnalysis;
-            if (ai.RecommendedEntry.HasValue) _entryPrice = ai.RecommendedEntry.Value;
-            if (ai.RecommendedStop.HasValue) _stopLoss = ai.RecommendedStop.Value;
-            if (ai.RecommendedTarget.HasValue) _target1 = ai.RecommendedTarget.Value;
+            if (ai.RecommendedEntry.HasValue && ai.RecommendedEntry.Value > 0)
+                _entryPrice = ai.RecommendedEntry.Value;
+            if (ai.RecommendedStop.HasValue && ai.RecommendedStop.Value > 0)
+                _stopLoss = ai.RecommendedStop.Value;
+            if (ai.RecommendedTarget.HasValue && ai.RecommendedTarget.Value > 0)
+                _target1 = ai.RecommendedTarget.Value;
+        }
+
+        _step = 2;
+    }
+
+    private void SkipToTradeSetup()
+    {
+        _selectedPattern = null;
+
+        // Try AI suggestions first
+        if (_scanResult?.AIAnalysis is not null)
+        {
+            var ai = _scanResult.AIAnalysis;
+            if (ai.RecommendedEntry.HasValue && ai.RecommendedEntry.Value > 0)
+                _entryPrice = ai.RecommendedEntry.Value;
+            if (ai.RecommendedStop.HasValue && ai.RecommendedStop.Value > 0)
+                _stopLoss = ai.RecommendedStop.Value;
+            if (ai.RecommendedTarget.HasValue && ai.RecommendedTarget.Value > 0)
+                _target1 = ai.RecommendedTarget.Value;
+            _tradeDirection = ai.OverallBias?.Contains("Bearish") == true ? "Short" : "Long";
+        }
+
+        // If levels are still 0, try the highest-confidence pattern
+        if (_entryPrice == 0 && _scanResult?.Patterns?.Any() == true)
+        {
+            var best = _scanResult.Patterns.OrderByDescending(p => p.Confidence).First();
+            if (best.SuggestedEntry > 0) _entryPrice = best.SuggestedEntry;
+            if (best.SuggestedStop > 0) _stopLoss = best.SuggestedStop;
+            if (best.SuggestedTarget > 0) _target1 = best.SuggestedTarget;
+            _tradeDirection = best.Direction == "Bearish" ? "Short" : "Long";
+        }
+
+        // Last resort: current price with default percentages
+        if (_entryPrice == 0 && _scanResult?.CurrentPrice > 0)
+        {
+            _entryPrice = _scanResult.CurrentPrice;
+            _stopLoss = Math.Round(_scanResult.CurrentPrice * 0.97m, 2);
+            _target1 = Math.Round(_scanResult.CurrentPrice * 1.05m, 2);
+            _tradeDirection = "Long";
         }
 
         _step = 2;
@@ -644,8 +977,9 @@
                 StopLoss = _stopLoss,
                 Target1 = _target1,
                 Target2 = _target2,
-                PortfolioSize = _portfolioSize,
+                PortfolioSize = _cashAvailable,  // Total cash for % calculations
                 RiskPercent = _riskPercent,
+                PositionBudget = _positionBudget, // How much to invest in this trade
                 IsShort = _tradeDirection == "Short",
                 WinRate = _selectedPattern?.HistoricalWinRate
             };
@@ -680,13 +1014,19 @@
             // 1. Create signal
             var signalType = _tradeDirection == "Short" ? SignalType.Short : SignalType.Long;
             var regime = Enum.TryParse<MarketRegime>(_scanResult?.CombinedRegime, out var parsed) ? parsed : MarketRegime.Choppy;
+            var assetClass = IsCrypto(_symbol) ? AssetClass.Crypto : AssetClass.Stock;
 
             var signalDto = new TradeSignalDto
             {
                 Asset = _symbol.ToUpper(),
-                AssetClass = AssetClass.Stock,
+                AssetClass = assetClass,
                 SignalType = signalType,
+                Source = SignalSource.Manual,
+                Status = SignalStatus.Accepted,
                 Regime = regime,
+                PatternName = _selectedPattern?.PatternName,
+                PatternTimeframe = _selectedPattern?.Timeframe ?? "Daily",
+                PatternConfidence = _selectedPattern?.Confidence,
                 SetupScore = _selectedPattern?.Confidence ?? 50,
                 EntryPrice = _entryPrice,
                 StopLoss = _stopLoss,
@@ -710,11 +1050,11 @@
             };
             var signal = await SignalApi.CreateSignalAsync(signalDto);
 
-            // 2. Open position
+            // 2. Open position (validates against cash available)
             var positionDto = new PositionDto
             {
                 Symbol = _symbol.ToUpper(),
-                AssetClass = AssetClass.Stock,
+                AssetClass = assetClass,
                 SignalType = signalType,
                 EntryPrice = _entryPrice,
                 Quantity = _riskResult?.ShareCount ?? 0,
@@ -739,9 +1079,9 @@
                         PatternConfidence = _selectedPattern?.Confidence,
                         TimeframeAlignment = _scanResult?.DirectionAlignment,
                         RegimeAlignment = _scanResult?.RegimeAlignment,
-                        MAAlignment = _scanResult?.Context?.MAAlignment,
-                        VolumeProfile = _scanResult?.Context?.VolumeProfile,
-                        RSIAtEntry = _scanResult?.Context?.RSI
+                        MAAlignment = GetActiveContext()?.MAAlignment,
+                        VolumeProfile = GetActiveContext()?.VolumeProfile,
+                        RSIAtEntry = GetActiveContext()?.RSI
                     });
                 }
                 catch { /* simulation is non-critical */ }

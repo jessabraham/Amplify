@@ -101,6 +101,102 @@ public class SettingsController : ControllerBase
         });
     }
 
+    // ===== PORTFOLIO BALANCE =====
+
+    [HttpGet("portfolio-balance")]
+    public async Task<IActionResult> GetPortfolioBalance()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return NotFound();
+
+        // Calculate invested (open position costs)
+        var totalInvested = 0m;
+        var totalUnrealizedPnL = 0m;
+        try
+        {
+            var openPositions = await _context.Positions
+                .Where(p => p.UserId == userId && p.Status == Domain.Enumerations.PositionStatus.Open && p.IsActive)
+                .ToListAsync();
+
+            totalInvested = openPositions.Sum(p => p.EntryPrice * p.Quantity);
+            totalUnrealizedPnL = openPositions.Sum(p => p.UnrealizedPnL);
+        }
+        catch { /* Positions table may not exist yet */ }
+
+        // Realized P&L from resolved simulated trades
+        var realizedPnL = 0m;
+        try
+        {
+            realizedPnL = await _context.SimulatedTrades
+                .Where(t => t.UserId == userId && t.Status == Domain.Enumerations.SimulationStatus.Resolved)
+                .SumAsync(t => t.PnLDollars ?? 0);
+        }
+        catch { }
+
+        var portfolioValue = user.StartingCapital + realizedPnL + totalUnrealizedPnL;
+        var cashAvailable = user.StartingCapital + realizedPnL - totalInvested;
+
+        // AI Trading Budget calculations
+        var aiBudgetDollars = Math.Round(cashAvailable * user.AiTradingBudgetPercent / 100m, 2);
+        // How much of the AI budget is currently invested in AI-created positions
+        var aiInvested = await _context.Positions
+            .Where(p => p.UserId == userId && p.Status == Domain.Enumerations.PositionStatus.Open && p.IsActive && p.IsAiGenerated)
+            .SumAsync(p => p.EntryPrice * p.Quantity);
+
+        return Ok(new PortfolioBalanceDto
+        {
+            StartingCapital = user.StartingCapital,
+            RealizedPnL = Math.Round(realizedPnL, 2),
+            UnrealizedPnL = Math.Round(totalUnrealizedPnL, 2),
+            PortfolioValue = Math.Round(portfolioValue, 2),
+            TotalInvested = Math.Round(totalInvested, 2),
+            CashAvailable = Math.Round(Math.Max(cashAvailable, 0), 2),
+            OpenPositionCount = (int)(totalInvested > 0 ? await _context.Positions
+                .CountAsync(p => p.UserId == userId && p.Status == Domain.Enumerations.PositionStatus.Open && p.IsActive) : 0),
+            AiTradingBudgetPercent = user.AiTradingBudgetPercent,
+            AiTradingBudgetDollars = Math.Max(aiBudgetDollars, 0),
+            AiCashUsed = Math.Round(aiInvested, 2),
+            AiCashRemaining = Math.Round(Math.Max(aiBudgetDollars - aiInvested, 0), 2)
+        });
+    }
+
+    [HttpPut("portfolio-balance")]
+    public async Task<IActionResult> UpdateStartingCapital([FromBody] UpdateCapitalRequest request)
+    {
+        if (request.StartingCapital < 100)
+            return BadRequest("Starting capital must be at least $100.");
+        if (request.StartingCapital > 100_000_000)
+            return BadRequest("Starting capital cannot exceed $100,000,000.");
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return NotFound();
+
+        user.StartingCapital = request.StartingCapital;
+        await _userManager.UpdateAsync(user);
+
+        return Ok(new { user.StartingCapital });
+    }
+
+    [HttpPut("ai-budget")]
+    public async Task<IActionResult> UpdateAiBudget([FromBody] UpdateAiBudgetRequest request)
+    {
+        if (request.AiTradingBudgetPercent < 0)
+            return BadRequest("AI budget cannot be negative.");
+        if (request.AiTradingBudgetPercent > 100)
+            return BadRequest("AI budget cannot exceed 100%.");
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return NotFound();
+
+        user.AiTradingBudgetPercent = request.AiTradingBudgetPercent;
+        await _userManager.UpdateAsync(user);
+
+        return Ok(new { user.AiTradingBudgetPercent });
+    }
+
     // ===== RISK DEFAULTS =====
 
     [HttpGet("risk")]
@@ -126,4 +222,29 @@ public class ChangePasswordRequest
 {
     public string CurrentPassword { get; set; } = "";
     public string NewPassword { get; set; } = "";
+}
+
+public class UpdateCapitalRequest
+{
+    public decimal StartingCapital { get; set; }
+}
+
+public class UpdateAiBudgetRequest
+{
+    public decimal AiTradingBudgetPercent { get; set; }
+}
+
+public class PortfolioBalanceDto
+{
+    public decimal StartingCapital { get; set; }
+    public decimal RealizedPnL { get; set; }
+    public decimal UnrealizedPnL { get; set; }
+    public decimal PortfolioValue { get; set; }
+    public decimal TotalInvested { get; set; }
+    public decimal CashAvailable { get; set; }
+    public int OpenPositionCount { get; set; }
+    public decimal AiTradingBudgetPercent { get; set; }
+    public decimal AiTradingBudgetDollars { get; set; }
+    public decimal AiCashUsed { get; set; }
+    public decimal AiCashRemaining { get; set; }
 }

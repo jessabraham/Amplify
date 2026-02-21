@@ -49,6 +49,10 @@ public class DashboardData
     public decimal TotalInvested { get; set; }
     public decimal TotalUnrealizedPnL { get; set; }
     public int OpenPositionCount { get; set; }
+    public decimal StartingCapital { get; set; }
+    public decimal CashAvailable { get; set; }
+    public decimal RealizedPnL { get; set; }
+    public decimal PortfolioValue { get; set; }
     public List<DashPositionItem> TopPositions { get; set; } = new();
     public List<DashPatternItem> RecentPatterns { get; set; } = new();
     public List<DashRegimeItem> RecentRegimes { get; set; } = new();

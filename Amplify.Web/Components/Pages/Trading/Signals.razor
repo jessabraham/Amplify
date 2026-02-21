@@ -1,23 +1,129 @@
 ﻿@page "/signals"
 @rendermode InteractiveServer
 @inject SignalApiClient SignalApi
+@inject SimulationApiClient SimApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
 @using Amplify.Application.Common.DTOs.Trading
+@using Amplify.Application.Common.Interfaces.Trading
+@using Amplify.Domain.Enumerations
 @using Amplify.Web.Services
 @using Amplify.Web.Components.Charts
 
 <div class="fade-in">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
         <h1><i class="ph-duotone ph-chart-bar" style="margin-right: 8px; color: var(--accent-cyan);"></i>Trade Signals</h1>
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <span style="font-size: 0.8rem; color: var(--text-muted);">
-                <i class="ph-light ph-pulse" style="margin-right: 4px;"></i>@_signals.Count active signals
-            </span>
-            <a href="/signals/create" class="btn btn-primary">
-                <i class="ph-bold ph-plus"></i> New Signal
-            </a>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            @if (_stats is not null)
+            {
+                <span style="font-size: 0.75rem; color: var(--text-muted);">
+                    @_stats.TotalSignals signals · @_stats.Pending pending
+                </span>
+            }
+            @if (_signals.Any())
+            {
+                <button class="btn btn-secondary" style="font-size: 0.75rem; color: var(--accent-red);" @onclick="ClearAllSignals">
+                    <i class="ph ph-trash" style="margin-right: 4px;"></i>Clear All
+                </button>
+            }
+            <button class="btn btn-primary" @onclick="() => _showCreateForm = !_showCreateForm">
+                <i class="ph-bold ph-plus" style="margin-right: 4px;"></i> New Signal
+            </button>
         </div>
+    </div>
+
+    <!-- ═══ QUICK CREATE FORM ═══ -->
+    @if (_showCreateForm)
+    {
+        <div class="card" style="margin-bottom: 20px; border: 1px solid rgba(6,182,212,0.3);">
+            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
+                <i class="ph-duotone ph-plus-circle" style="margin-right: 6px; color: var(--accent-cyan);"></i>Quick Create Signal
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 120px 120px 120px 120px 120px; gap: 10px; align-items: end;">
+                <div>
+                    <label class="form-label">Symbol</label>
+                    <input @bind="_newSymbol" class="form-input" placeholder="AAPL, TSLA..." style="text-transform: uppercase;" />
+                </div>
+                <div>
+                    <label class="form-label">Direction</label>
+                    <select @bind="_newDirection" class="form-select">
+                        <option value="Long">Long</option>
+                        <option value="Short">Short</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">Entry</label>
+                    <input @bind="_newEntry" type="number" step="0.01" class="form-input" />
+                </div>
+                <div>
+                    <label class="form-label">Stop Loss</label>
+                    <input @bind="_newStop" type="number" step="0.01" class="form-input" />
+                </div>
+                <div>
+                    <label class="form-label">Target</label>
+                    <input @bind="_newTarget" type="number" step="0.01" class="form-input" />
+                </div>
+                <button class="btn btn-primary" @onclick="CreateManualSignal" disabled="@_creating" style="height: 38px;">
+                    @(_creating ? "Creating..." : "Create")
+                </button>
+            </div>
+            @if (!string.IsNullOrEmpty(_createError))
+            {
+                <div style="color: var(--accent-red); font-size: 0.8rem; margin-top: 8px;">@_createError</div>
+            }
+        </div>
+    }
+
+    <!-- ═══ PERFORMANCE COMPARISON ═══ -->
+    @if (_stats is not null && (_stats.AITradeCount > 0 || _stats.ManualTradeCount > 0))
+    {
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+            <div class="card" style="text-align: center; padding: 14px;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">AI Win Rate</div>
+                <div style="font-size: 1.4rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--accent-cyan);">
+                    @(_stats.AITradeCount > 0 ? $"{_stats.AIWinRate:F0}%" : "—")
+                </div>
+                <div style="font-size: 0.65rem; color: var(--text-muted);">@_stats.AITradeCount trades</div>
+            </div>
+            <div class="card" style="text-align: center; padding: 14px;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Manual Win Rate</div>
+                <div style="font-size: 1.4rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--accent-amber);">
+                    @(_stats.ManualTradeCount > 0 ? $"{_stats.ManualWinRate:F0}%" : "—")
+                </div>
+                <div style="font-size: 0.65rem; color: var(--text-muted);">@_stats.ManualTradeCount trades</div>
+            </div>
+            <div class="card" style="text-align: center; padding: 14px;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">AI Avg R</div>
+                <div style="font-size: 1.4rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: @(_stats.AIAvgRMultiple >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                    @(_stats.AITradeCount > 0 ? $"{_stats.AIAvgRMultiple:+0.0;-0.0}R" : "—")
+                </div>
+            </div>
+            <div class="card" style="text-align: center; padding: 14px;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Manual Avg R</div>
+                <div style="font-size: 1.4rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: @(_stats.ManualAvgRMultiple >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                    @(_stats.ManualTradeCount > 0 ? $"{_stats.ManualAvgRMultiple:+0.0;-0.0}R" : "—")
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- ═══ FILTER TABS ═══ -->
+    <div style="display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;">
+        @foreach (var filter in _filters)
+        {
+            var isActive = _activeFilter == filter.Key;
+            <button @onclick="() => SetFilter(filter.Key)"
+                    style="padding: 6px 14px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.15s; border: 1px solid @(isActive ? "var(--accent-cyan)" : "var(--border)"); background: @(isActive ? "rgba(6,182,212,0.15)" : "transparent"); color: @(isActive ? "var(--accent-cyan)" : "var(--text-muted)");">
+                @filter.Value
+                @{
+                    var count = GetFilterCount(filter.Key);
+                }
+                @if (count > 0)
+                {
+                    <span style="margin-left: 4px; background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 10px; font-size: 0.65rem;">@count</span>
+                }
+            </button>
+        }
     </div>
 
     @if (_loading)
@@ -27,40 +133,29 @@
             <p style="color: var(--text-muted); margin-top: 12px;">Loading signals...</p>
         </div>
     }
-    else if (_signals.Count == 0)
+    else if (!FilteredSignals.Any())
     {
         <div class="card" style="text-align: center; padding: 48px;">
             <i class="ph-thin ph-chart-bar" style="font-size: 3rem; color: var(--text-muted);"></i>
-            <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">No active signals found.</p>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Create your first signal to get started.</p>
+            <p style="color: var(--text-muted); font-size: 1rem; margin-top: 12px;">No signals found.</p>
+            <p style="color: var(--text-muted); font-size: 0.8rem;">@(_activeFilter == "all" ? "Create a manual signal or wait for the scanner to find setups." : "No signals match this filter.")</p>
         </div>
     }
     else
     {
-        <!-- Chart Panel (shows when a signal is selected) -->
+        <!-- Chart Panel -->
         @if (_selectedSignal is not null)
         {
             <div style="margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-heading);">
-                            @_selectedSignal.Asset
-                        </span>
-                        <span class="signal-type-badge @(_selectedSignal.SignalType.ToString().ToLower() == "short" ? "short" : "long")" style="font-size: 0.65rem;">
-                            @_selectedSignal.SignalType
-                        </span>
-                        <span class="regime-badge @(_selectedSignal.Regime.ToString().ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion"))" style="font-size: 0.6rem;">
-                            @_selectedSignal.Regime
-                        </span>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">
-                            Score: <span style="font-weight: 700; color: var(--accent-cyan);">@_selectedSignal.SetupScore.ToString("F1")</span>
-                        </span>
+                        <span style="font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-heading);">@_selectedSignal.Asset</span>
+                        <span class="signal-type-badge @(_selectedSignal.SignalType.ToString().ToLower() == "short" ? "short" : "long")" style="font-size: 0.65rem;">@_selectedSignal.SignalType</span>
                     </div>
-                    <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 5px 12px;" @onclick="CloseChart">
-                        <i class="ph ph-x" style="margin-right: 4px;"></i>Close Chart
+                    <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 5px 12px;" @onclick="() => _selectedSignal = null">
+                        <i class="ph ph-x" style="margin-right: 4px;"></i>Close
                     </button>
                 </div>
-
                 <PriceChart Symbol="@_selectedSignal.Asset"
                             EntryPrice="@_selectedSignal.EntryPrice"
                             StopLoss="@_selectedSignal.StopLoss"
@@ -71,70 +166,101 @@
 
         <!-- Signal Cards Grid -->
         <div class="signal-grid">
-            @foreach (var s in _signals)
+            @foreach (var s in FilteredSignals)
             {
                 var signalClass = s.SignalType.ToString().ToLower() == "short" ? "short" : "long";
                 var regimeClass = s.Regime.ToString().ToLower().Replace("volexpansion", "vol-expansion").Replace("meanreversion", "mean-reversion");
-                var scorePercent = s.SetupScore;
-                var scoreLevel = scorePercent >= 75 ? "high" : scorePercent >= 50 ? "medium" : "low";
+                var scoreLevel = s.SetupScore >= 75 ? "high" : s.SetupScore >= 50 ? "medium" : "low";
                 var isSelected = _selectedSignal?.Id == s.Id;
+                var sourceColor = s.Source == SignalSource.AI ? "var(--accent-cyan)" : "var(--accent-amber)";
+                var statusColor = s.Status switch
+                {
+                    SignalStatus.Pending => "var(--accent-amber)",
+                    SignalStatus.Accepted => "var(--accent-green)",
+                    SignalStatus.Rejected => "var(--accent-red)",
+                    _ => "var(--text-muted)"
+                };
 
                 <div class="signal-card @signalClass @(isSelected ? "selected" : "")"
-                     @onclick="() => SelectSignal(s)"
+                     @onclick="() => _selectedSignal = isSelected ? null : s"
                      style="cursor: pointer; @(isSelected ? "border-color: var(--accent-cyan); box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);" : "")">
 
+                    <!-- Header: Asset + Source badge + Status -->
                     <div class="signal-card-header">
-                        <span class="signal-asset">@s.Asset</span>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            @if (isSelected)
-                            {
-                                <i class="ph-bold ph-chart-line" style="color: var(--accent-cyan); font-size: 0.85rem;" title="Chart open"></i>
-                            }
+                            <span class="signal-asset">@s.Asset</span>
+                            <span style="font-size: 0.55rem; padding: 2px 6px; border-radius: 3px; font-weight: 700; letter-spacing: 0.04em; background: @(s.Source == SignalSource.AI ? "rgba(6,182,212,0.15)" : "rgba(245,158,11,0.15)"); color: @sourceColor;">
+                                @(s.Source == SignalSource.AI ? "AI" : "MANUAL")
+                            </span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 0.55rem; padding: 2px 6px; border-radius: 3px; font-weight: 600; background: rgba(255,255,255,0.05); color: @statusColor;">
+                                @s.Status
+                            </span>
                             <span class="signal-type-badge @signalClass">
                                 @if (signalClass == "long")
                                 {
-                                    <i class="ph-bold ph-trend-up" style="margin-right: 4px;"></i>
+                                    <i class="ph-bold ph-trend-up" style="margin-right: 3px;"></i>
                                 }
                                 else
                                 {
-                                    <i class="ph-bold ph-trend-down" style="margin-right: 4px;"></i>
+
+                                    <i class="ph-bold ph-trend-down" style="margin-right: 3px;"></i>
                                 }
                                 @s.SignalType
                             </span>
                         </div>
                     </div>
 
-                    <div class="signal-score">
-                        <div class="score-bar">
-                            <div class="score-bar-fill @scoreLevel" style="width: @(scorePercent)%"></div>
+                    <!-- Pattern + AI confidence -->
+                    @if (!string.IsNullOrEmpty(s.PatternName) || s.AIConfidence.HasValue)
+                    {
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 0.7rem; color: var(--text-muted);">
+                            @if (!string.IsNullOrEmpty(s.PatternName))
+                            {
+                                <span>@s.PatternName</span>
+                            }
+                            @if (!string.IsNullOrEmpty(s.PatternTimeframe))
+                            {
+                                <span style="padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); font-size: 0.6rem;">@s.PatternTimeframe</span>
+                            }
+                            @if (s.AIConfidence.HasValue)
+                            {
+                                <span style="color: var(--accent-cyan);">AI: @(s.AIConfidence.Value.ToString("F0"))%</span>
+                            }
                         </div>
-                        <span class="score-value">@s.SetupScore.ToString("F1")</span>
-                    </div>
+                    }
 
+                    <!-- Score bar -->
+                    @if (s.SetupScore > 0)
+                    {
+                        <div class="signal-score">
+                            <div class="score-bar">
+                                <div class="score-bar-fill @scoreLevel" style="width: @(s.SetupScore)%"></div>
+                            </div>
+                            <span class="score-value">@s.SetupScore.ToString("F0")</span>
+                        </div>
+                    }
+
+                    <!-- Price levels -->
                     <div class="signal-levels">
                         <div class="level-item">
-                            <div class="level-label"><i class="ph-light ph-sign-in" style="margin-right: 3px;"></i>Entry</div>
-                            <div class="level-value entry">@s.EntryPrice.ToString("C")</div>
+                            <div class="level-label">Entry</div>
+                            <div class="level-value entry">@FormatPrice(s.EntryPrice)</div>
                         </div>
                         <div class="level-item">
-                            <div class="level-label"><i class="ph-light ph-shield-warning" style="margin-right: 3px;"></i>Stop Loss</div>
-                            <div class="level-value stop">@s.StopLoss.ToString("C")</div>
+                            <div class="level-label">Stop</div>
+                            <div class="level-value stop">@FormatPrice(s.StopLoss)</div>
                         </div>
                         <div class="level-item">
-                            <div class="level-label"><i class="ph-light ph-target" style="margin-right: 3px;"></i>Target 1</div>
-                            <div class="level-value target">@s.Target1.ToString("C")</div>
-                        </div>
-                        <div class="level-item">
-                            <div class="level-label"><i class="ph-light ph-target" style="margin-right: 3px;"></i>Target 2</div>
-                            <div class="level-value target">@s.Target2.ToString("C")</div>
+                            <div class="level-label">Target</div>
+                            <div class="level-value target">@FormatPrice(s.Target1)</div>
                         </div>
                     </div>
 
+                    <!-- Footer: regime + time -->
                     <div class="signal-footer">
-                        <span class="regime-badge @regimeClass">@s.Regime</span>
-                        <span class="risk-badge">
-                            <i class="ph-light ph-warning" style="margin-right: 3px;"></i>@s.RiskPercent.ToString("F1")%
-                        </span>
+                        <span class="regime-badge @regimeClass" style="font-size: 0.55rem; padding: 2px 8px;">@s.Regime</span>
                         <span class="signal-time">
                             <i class="ph-thin ph-clock" style="margin-right: 3px;"></i>@s.CreatedAt.ToString("MMM dd, HH:mm")
                         </span>
@@ -142,19 +268,31 @@
 
                     <!-- Action Buttons -->
                     <div style="display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
-                        @{
-                            var riskUrl = $"/risk?symbol={s.Asset}&entry={s.EntryPrice}&stop={s.StopLoss}&target={s.Target1}&dir={s.SignalType}";
+                        @if (s.Status == SignalStatus.Pending)
+                        {
+                            <button class="btn btn-primary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
+                                    @onclick="() => AcceptSignal(s.Id)" @onclick:stopPropagation="true">
+                                <i class="ph-bold ph-check" style="margin-right: 3px;"></i>Accept
+                            </button>
+                            <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1; color: var(--accent-red);"
+                                    @onclick="() => RejectSignal(s.Id)" @onclick:stopPropagation="true">
+                                <i class="ph-bold ph-x" style="margin-right: 3px;"></i>Reject
+                            </button>
                         }
-                        <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
-                                @onclick="() => Nav.NavigateTo(riskUrl)" @onclick:stopPropagation="true">
-                            <i class="ph-light ph-shield-check" style="margin-right: 3px;"></i>Risk Calc
-                        </button>
-                        @{
-                            var planUrl = $"/planner?symbol={s.Asset}";
+                        else
+                        {
+                            <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
+                                    @onclick="() => GoToRisk(s)" @onclick:stopPropagation="true">
+                                <i class="ph-light ph-shield-check" style="margin-right: 3px;"></i>Risk
+                            </button>
+                            <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
+                                    @onclick="() => GoToPlanner(s)" @onclick:stopPropagation="true">
+                                <i class="ph-light ph-path" style="margin-right: 3px;"></i>Plan
+                            </button>
                         }
-                        <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px; flex: 1;"
-                                @onclick="() => Nav.NavigateTo(planUrl)" @onclick:stopPropagation="true">
-                            <i class="ph-light ph-path" style="margin-right: 3px;"></i>Plan Trade
+                        <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; color: var(--text-muted);"
+                                @onclick="() => DeleteSignal(s.Id)" @onclick:stopPropagation="true" title="Delete">
+                            <i class="ph ph-trash"></i>
                         </button>
                     </div>
                 </div>
@@ -166,8 +304,41 @@
 @code {
     private List<TradeSignalDto> _signals = new();
     private TradeSignalDto? _selectedSignal;
+    private SignalStatsDto? _stats;
     private bool _loading = true;
     private bool _loaded;
+
+    // Filters
+    private string _activeFilter = "all";
+    private static readonly Dictionary<string, string> _filters = new()
+    {
+        { "all", "All" },
+        { "pending", "Pending" },
+        { "ai", "AI Signals" },
+        { "manual", "Manual" },
+        { "accepted", "Accepted" },
+        { "rejected", "Rejected" }
+    };
+
+    // Quick Create
+    private bool _showCreateForm;
+    private string _newSymbol = "";
+    private string _newDirection = "Long";
+    private decimal _newEntry;
+    private decimal _newStop;
+    private decimal _newTarget;
+    private bool _creating;
+    private string? _createError;
+
+    private IEnumerable<TradeSignalDto> FilteredSignals => _activeFilter switch
+    {
+        "pending" => _signals.Where(s => s.Status == SignalStatus.Pending),
+        "ai" => _signals.Where(s => s.Source == SignalSource.AI),
+        "manual" => _signals.Where(s => s.Source == SignalSource.Manual),
+        "accepted" => _signals.Where(s => s.Status == SignalStatus.Accepted),
+        "rejected" => _signals.Where(s => s.Status == SignalStatus.Rejected),
+        _ => _signals
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -181,33 +352,125 @@
             return;
         }
 
-        try
-        {
-            _signals = await SignalApi.GetSignalsAsync();
-        }
-        catch
-        {
-            Nav.NavigateTo("/login");
-            return;
-        }
-        finally
-        {
-            _loading = false;
-        }
-
+        await LoadData();
         StateHasChanged();
     }
 
-    private void SelectSignal(TradeSignalDto signal)
+    private async Task LoadData()
     {
-        if (_selectedSignal?.Id == signal.Id)
-            _selectedSignal = null;
-        else
-            _selectedSignal = signal;
+        _loading = true;
+        try
+        {
+            _signals = await SignalApi.GetSignalsAsync();
+            _stats = await SignalApi.GetStatsAsync();
+        }
+        catch { Nav.NavigateTo("/login"); return; }
+        finally { _loading = false; }
     }
 
-    private void CloseChart()
+    private void SetFilter(string filter)
     {
+        _activeFilter = filter;
         _selectedSignal = null;
+    }
+
+    private int GetFilterCount(string filter) => filter switch
+    {
+        "pending" => _signals.Count(s => s.Status == SignalStatus.Pending),
+        "ai" => _signals.Count(s => s.Source == SignalSource.AI),
+        "manual" => _signals.Count(s => s.Source == SignalSource.Manual),
+        "accepted" => _signals.Count(s => s.Status == SignalStatus.Accepted),
+        "rejected" => _signals.Count(s => s.Status == SignalStatus.Rejected),
+        _ => _signals.Count
+    };
+
+    private async Task CreateManualSignal()
+    {
+        _createError = null;
+        if (string.IsNullOrWhiteSpace(_newSymbol)) { _createError = "Enter a symbol."; return; }
+        if (_newEntry <= 0) { _createError = "Enter a valid entry price."; return; }
+        if (_newStop <= 0) { _createError = "Enter a valid stop loss."; return; }
+        if (_newTarget <= 0) { _createError = "Enter a valid target."; return; }
+
+        _creating = true;
+        var dto = new TradeSignalDto
+        {
+            Asset = _newSymbol.ToUpper().Trim(),
+            SignalType = _newDirection == "Short" ? SignalType.Short : SignalType.Long,
+            Source = SignalSource.Manual,
+            Status = SignalStatus.Accepted,
+            EntryPrice = _newEntry,
+            StopLoss = _newStop,
+            Target1 = _newTarget,
+            Regime = MarketRegime.Trending
+        };
+
+        var result = await SignalApi.CreateSignalAsync(dto);
+        _creating = false;
+
+        if (result is not null)
+        {
+            _newSymbol = ""; _newEntry = 0; _newStop = 0; _newTarget = 0;
+            _showCreateForm = false;
+            await LoadData();
+        }
+        else
+        {
+            _createError = "Failed to create signal.";
+        }
+    }
+
+    private async Task AcceptSignal(Guid id)
+    {
+        var success = await SignalApi.AcceptSignalAsync(id);
+        if (success) await LoadData();
+        StateHasChanged();
+    }
+
+    private async Task RejectSignal(Guid id)
+    {
+        var success = await SignalApi.RejectSignalAsync(id);
+        if (success) await LoadData();
+        StateHasChanged();
+    }
+
+    private async Task DeleteSignal(Guid id)
+    {
+        var success = await SignalApi.DeleteSignalAsync(id);
+        if (success)
+        {
+            _signals.RemoveAll(s => s.Id == id);
+            if (_selectedSignal?.Id == id) _selectedSignal = null;
+            _stats = await SignalApi.GetStatsAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearAllSignals()
+    {
+        var success = await SignalApi.ClearAllSignalsAsync();
+        if (success)
+        {
+            _signals.Clear();
+            _selectedSignal = null;
+            _stats = await SignalApi.GetStatsAsync();
+            StateHasChanged();
+        }
+    }
+
+    private static string FormatPrice(decimal price)
+    {
+        if (price >= 1000) return price.ToString("N2");
+        return price.ToString("C2");
+    }
+
+    private void GoToRisk(TradeSignalDto s)
+    {
+        Nav.NavigateTo($"/risk?symbol={s.Asset}&entry={s.EntryPrice}&stop={s.StopLoss}&target={s.Target1}&dir={s.SignalType}");
+    }
+
+    private void GoToPlanner(TradeSignalDto s)
+    {
+        Nav.NavigateTo($"/planner?symbol={s.Asset}");
     }
 }

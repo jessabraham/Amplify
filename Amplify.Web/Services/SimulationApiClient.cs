@@ -78,6 +78,28 @@ public class SimulationApiClient
         if (!response.IsSuccessStatusCode) return null;
         return await response.Content.ReadFromJsonAsync<UserTradingStatsDto>();
     }
+
+    /// <summary>
+    /// Delete a single simulated trade.
+    /// </summary>
+    public async Task<bool> DeleteTradeAsync(Guid tradeId)
+    {
+        AttachToken();
+        var response = await _http.DeleteAsync($"api/Simulation/{tradeId}");
+        return response.IsSuccessStatusCode;
+    }
+
+    /// <summary>
+    /// Clear all simulated trades for the current user.
+    /// </summary>
+    public async Task<int> ClearAllTradesAsync()
+    {
+        AttachToken();
+        var response = await _http.DeleteAsync("api/Simulation/clear-all");
+        if (!response.IsSuccessStatusCode) return 0;
+        var result = await response.Content.ReadFromJsonAsync<ClearAllResultDto>();
+        return result?.Deleted ?? 0;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -171,4 +193,9 @@ public class UserTradingStatsDto
     public decimal ShortWinRate { get; set; }
     public decimal AlignedWinRate { get; set; }
     public decimal ConflictingWinRate { get; set; }
+}
+
+public class ClearAllResultDto
+{
+    public int Deleted { get; set; }
 }

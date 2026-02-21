@@ -73,6 +73,13 @@ public class PortfolioController : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
 
+    [HttpDelete("positions/{id}")]
+    public async Task<IActionResult> DeletePosition(Guid id)
+    {
+        var result = await _portfolioService.DeletePositionAsync(id, UserId);
+        return result.IsSuccess ? NoContent() : BadRequest(result.Error);
+    }
+
     // ── Snapshots ───────────────────────────────────────────────────
 
     [HttpPost("snapshots")]

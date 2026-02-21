@@ -44,21 +44,16 @@
         <!-- Stats Row -->
         <div class="stats-row" style="margin-bottom: 20px;">
             <div class="stat-card">
-                <div class="stat-label"><i class="ph-light ph-wallet" style="margin-right: 4px;"></i>Invested</div>
-                <div class="stat-value">@(_data.TotalInvested.ToString("C0"))</div>
+                <div class="stat-label"><i class="ph-light ph-bank" style="margin-right: 4px;"></i>Portfolio Value</div>
+                <div class="stat-value">@((_data.PortfolioValue > 0 ? _data.PortfolioValue : _data.StartingCapital).ToString("C0"))</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="ph-light ph-coins" style="margin-right: 4px;"></i>Cash Available</div>
+                <div class="stat-value" style="color: var(--accent-green);">@(_data.CashAvailable.ToString("C0"))</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label"><i class="ph-light ph-chart-line-up" style="margin-right: 4px;"></i>Unrealized P&amp;L</div>
-                @{
-                    var pnlClass = _data.TotalUnrealizedPnL >= 0 ? "positive" : "negative";
-                }
-                @{
-                    var pnlSign = _data.TotalUnrealizedPnL >= 0 ? "+" : "";
-                }
-                @{
-                    var pnlDisplay = pnlSign + _data.TotalUnrealizedPnL.ToString("C0");
-                }
-                <div class="stat-value @pnlClass">@pnlDisplay</div>
+                <div class="stat-value @(_data.TotalUnrealizedPnL >= 0 ? "positive" : "negative")">@((_data.TotalUnrealizedPnL >= 0 ? "+" : "") + _data.TotalUnrealizedPnL.ToString("C0"))</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label"><i class="ph-light ph-stack" style="margin-right: 4px;"></i>Open Positions</div>

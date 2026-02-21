@@ -69,6 +69,65 @@ namespace Amplify.Infrastructure.Migrations
                     b.ToTable("AIAnalytics", (string)null);
                 });
 
+            modelBuilder.Entity("Amplify.Domain.Entities.AI.PortfolioAdvice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AllocationsFollowed")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("CashAvailable")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("CashRetained")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DiversificationScore")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("OpenPositionCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResponseJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TotalAllocations")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalInvested")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("TotalSuggestedAllocation")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("WatchlistCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("PortfolioAdvices");
+                });
+
             modelBuilder.Entity("Amplify.Domain.Entities.Identity.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -76,6 +135,9 @@ namespace Amplify.Infrastructure.Migrations
 
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("AiTradingBudgetPercent")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
@@ -123,6 +185,9 @@ namespace Amplify.Infrastructure.Migrations
 
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("StartingCapital")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<bool>("TwoFactorEnabled")
                         .HasColumnType("bit");
@@ -641,6 +706,9 @@ namespace Amplify.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsAiGenerated")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -881,6 +949,9 @@ namespace Amplify.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<DateTime?>("AcceptedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("ArchivedAt")
                         .HasColumnType("datetime2");
 
@@ -901,8 +972,20 @@ namespace Amplify.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("PatternConfidence")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("PatternName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PatternTimeframe")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("Regime")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<decimal?>("RiskKellyPercent")
                         .HasPrecision(10, 4)
@@ -941,6 +1024,12 @@ namespace Amplify.Infrastructure.Migrations
                         .HasColumnType("decimal(5,2)");
 
                     b.Property<int>("SignalType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
                         .HasColumnType("int");
 
                     b.Property<decimal>("StopLoss")
@@ -1214,6 +1303,17 @@ namespace Amplify.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("TradeSignal");
+                });
+
+            modelBuilder.Entity("Amplify.Domain.Entities.AI.PortfolioAdvice", b =>
+                {
+                    b.HasOne("Amplify.Domain.Entities.Identity.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Amplify.Domain.Entities.Trading.BacktestResult", b =>

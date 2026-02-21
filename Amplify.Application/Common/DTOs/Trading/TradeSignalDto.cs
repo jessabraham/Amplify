@@ -9,12 +9,25 @@ public class TradeSignalDto
     public AssetClass AssetClass { get; set; }
     public SignalType SignalType { get; set; }
     public MarketRegime Regime { get; set; }
+
+    // Source & Status
+    public SignalSource Source { get; set; }
+    public SignalStatus Status { get; set; }
+
+    // Pattern context
+    public string? PatternName { get; set; }
+    public string? PatternTimeframe { get; set; }
+    public decimal? PatternConfidence { get; set; }
+
+    // Levels
     public decimal SetupScore { get; set; }
     public decimal EntryPrice { get; set; }
     public decimal StopLoss { get; set; }
     public decimal Target1 { get; set; }
     public decimal Target2 { get; set; }
     public decimal RiskPercent { get; set; }
+
+    // AI
     public string? AIAdvisoryJson { get; set; }
     public string? AISummary { get; set; }
     public string? AIBias { get; set; }
@@ -33,4 +46,6 @@ public class TradeSignalDto
 
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public DateTime? RejectedAt { get; set; }
 }

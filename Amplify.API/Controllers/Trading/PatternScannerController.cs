@@ -1,4 +1,5 @@
 ﻿using Amplify.Application.Common.Interfaces.AI;
+using Amplify.Application.Common.Interfaces.Market;
 using Amplify.Application.Common.Interfaces.Trading;
 using Amplify.Application.Common.Models;
 using Amplify.Domain.Entities.Trading;
@@ -21,13 +22,20 @@ public class PatternScannerController : ControllerBase
     private readonly IPatternAnalyzer _analyzer;
     private readonly ApplicationDbContext _context;
     private readonly TradeSimulationService _simulation;
+    private readonly IMarketDataService _marketData;
 
-    public PatternScannerController(IPatternDetector detector, IPatternAnalyzer analyzer, ApplicationDbContext context, TradeSimulationService simulation)
+    public PatternScannerController(
+        IPatternDetector detector,
+        IPatternAnalyzer analyzer,
+        ApplicationDbContext context,
+        TradeSimulationService simulation,
+        IMarketDataService marketData)
     {
         _detector = detector;
         _analyzer = analyzer;
         _context = context;
         _simulation = simulation;
+        _marketData = marketData;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -40,12 +48,16 @@ public class PatternScannerController : ControllerBase
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         var symbol = request.Symbol.ToUpper();
 
-        // ── Generate candles for each timeframe ──────────────────────
-        var candles4H = GenerateSampleCandles(symbol, 200, "4H");
-        var candlesDaily = GenerateSampleCandles(symbol, 250, "Daily");
-        var candlesWeekly = GenerateSampleCandles(symbol, 104, "Weekly"); // ~2 years
+        // ── Fetch candles for each timeframe (Alpaca → sample data fallback) ──
+        var candles1H = await _marketData.GetCandlesAsync(symbol, 200, "1H");
+        var candles4H = await _marketData.GetCandlesAsync(symbol, 200, "4H");
+        var candlesDaily = await _marketData.GetCandlesAsync(symbol, 250, "Daily");
+        var candlesWeekly = await _marketData.GetCandlesAsync(symbol, 104, "Weekly");
 
         // ── Detect patterns per timeframe ────────────────────────────
+        var patterns1H = _detector.DetectAll(candles1H);
+        patterns1H.ForEach(p => p.Timeframe = "1H");
+
         var patterns4H = _detector.DetectAll(candles4H);
         patterns4H.ForEach(p => p.Timeframe = "4H");
 
@@ -55,27 +67,39 @@ public class PatternScannerController : ControllerBase
         var patternsWeekly = _detector.DetectAll(candlesWeekly);
         patternsWeekly.ForEach(p => p.Timeframe = "Weekly");
 
+        Console.WriteLine($"📊 Scan {symbol}: 1H={candles1H.Count} candles/{patterns1H.Count} patterns, " +
+            $"4H={candles4H.Count}/{patterns4H.Count}, Daily={candlesDaily.Count}/{patternsDaily.Count}, " +
+            $"Weekly={candlesWeekly.Count}/{patternsWeekly.Count}");
+
         // ── Build context per timeframe ──────────────────────────────
+        var ctx1H = BuildMarketContext(candles1H, "1H");
         var ctx4H = BuildMarketContext(candles4H, "4H");
         var ctxDaily = BuildMarketContext(candlesDaily, "Daily");
         var ctxWeekly = BuildMarketContext(candlesWeekly, "Weekly");
 
         // ── Deduplicate patterns per timeframe ───────────────────────
+        var dedup1H = DeduplicatePatterns(patterns1H);
         var dedup4H = DeduplicatePatterns(patterns4H);
         var dedupDaily = DeduplicatePatterns(patternsDaily);
         var dedupWeekly = DeduplicatePatterns(patternsWeekly);
 
+        Console.WriteLine($"📊 After dedup: 1H={patterns1H.Count}→{dedup1H.Count}, " +
+            $"4H={patterns4H.Count}→{dedup4H.Count}, Daily={patternsDaily.Count}→{dedupDaily.Count}, " +
+            $"Weekly={patternsWeekly.Count}→{dedupWeekly.Count}");
+
         // ── Apply timeframe weights to confidence ────────────────────
-        // Weekly patterns get boosted, 4H get reduced
-        foreach (var p in dedup4H) p.Confidence = Math.Min(p.Confidence * 0.8m, 100);
-        foreach (var p in dedupWeekly) p.Confidence = Math.Min(p.Confidence * 1.2m, 100);
+        // Gentle scaling — don't penalize short timeframes too harshly
+        foreach (var p in dedup1H) p.Confidence = Math.Min(p.Confidence * 0.85m, 95);
+        foreach (var p in dedup4H) p.Confidence = Math.Min(p.Confidence * 0.90m, 95);
+        foreach (var p in dedupWeekly) p.Confidence = Math.Min(p.Confidence * 1.05m, 98);
 
         // ── Build timeframe data ─────────────────────────────────────
+        var tf1H = BuildTimeframeData("1H", 0.5m, dedup1H, ctx1H);
         var tf4H = BuildTimeframeData("4H", 1.0m, dedup4H, ctx4H);
         var tfDaily = BuildTimeframeData("Daily", 2.0m, dedupDaily, ctxDaily);
         var tfWeekly = BuildTimeframeData("Weekly", 3.0m, dedupWeekly, ctxWeekly);
 
-        var timeframes = new List<TimeframeData> { tf4H, tfDaily, tfWeekly };
+        var timeframes = new List<TimeframeData> { tf1H, tf4H, tfDaily, tfWeekly };
 
         // ── Combined regime (weighted) ───────────────────────────────
         var (combinedRegime, regimeConf, regimeAlign) = CombineRegimes(timeframes);
@@ -83,14 +107,104 @@ public class PatternScannerController : ControllerBase
         // ── Direction alignment ──────────────────────────────────────
         var (dirAlign, alignScore) = CalculateDirectionAlignment(timeframes);
 
-        // ── Top patterns (best per type across all timeframes) ───────
-        var allPatterns = dedup4H.Concat(dedupDaily).Concat(dedupWeekly).ToList();
-        var topPatterns = allPatterns
-            .GroupBy(p => p.PatternName)
-            .Select(g => g.OrderByDescending(p => p.Confidence).First())
+        // ── All patterns from all timeframes (deduped per timeframe) ──
+        var topPatterns = dedup1H.Concat(dedup4H).Concat(dedupDaily).Concat(dedupWeekly)
             .OrderByDescending(p => p.Confidence)
-            .Take(12)
             .ToList();
+
+        Console.WriteLine($"📊 All patterns: 1H={topPatterns.Count(p => p.Timeframe == "1H")}, " +
+            $"4H={topPatterns.Count(p => p.Timeframe == "4H")}, " +
+            $"Daily={topPatterns.Count(p => p.Timeframe == "Daily")}, " +
+            $"Weekly={topPatterns.Count(p => p.Timeframe == "Weekly")}");
+
+        // ── Remove contradictory patterns on overlapping candles ────
+        // Can't have opposite signals on the same date range within the SAME timeframe
+        var contradictionPairs = new[]
+        {
+            // Candlestick opposites
+            ("Bullish Engulfing", "Bearish Engulfing"),
+            ("Bullish Harami", "Bearish Harami"),
+            ("Morning Star", "Evening Star"),
+            ("Three White Soldiers", "Three Black Crows"),
+            ("Hammer", "Shooting Star"),
+            ("Inverted Hammer", "Shooting Star"),
+            ("Hammer", "Inverted Hammer"),
+            ("Piercing Line", "Dark Cloud Cover"),
+            // Chart pattern opposites
+            ("Double Bottom", "Double Top"),
+            ("Head and Shoulders", "Inverse Head and Shoulders"),
+            // Technical indicator opposites
+            ("Golden Cross", "Death Cross"),
+            ("MACD Bullish Cross", "MACD Bearish Cross"),
+            ("RSI Overbought", "RSI Oversold"),
+            // Cross-category conflicts
+            ("Hammer", "Evening Star"),
+            ("Hammer", "Bearish Engulfing"),
+            ("Hammer", "Dark Cloud Cover"),
+            ("Hammer", "Three Black Crows"),
+            ("Morning Star", "Shooting Star"),
+            ("Morning Star", "Bearish Engulfing"),
+            ("Morning Star", "Dark Cloud Cover"),
+            ("Bullish Engulfing", "Evening Star"),
+            ("Bullish Engulfing", "Shooting Star"),
+            ("Bullish Engulfing", "Dark Cloud Cover"),
+            ("Three White Soldiers", "Evening Star"),
+            ("Three White Soldiers", "Shooting Star"),
+            ("Three White Soldiers", "Bearish Engulfing"),
+            ("Piercing Line", "Evening Star"),
+            ("Piercing Line", "Shooting Star")
+        };
+
+        // Process contradictions PER TIMEFRAME — a 1H Hammer doesn't conflict with a Weekly Shooting Star
+        foreach (var tf in new[] { "1H", "4H", "Daily", "Weekly" })
+        {
+            var tfPatterns2 = topPatterns.Where(p => p.Timeframe == tf).ToList();
+            foreach (var (nameA, nameB) in contradictionPairs)
+            {
+                var patA = tfPatterns2.FirstOrDefault(p => p.PatternName == nameA);
+                var patB = tfPatterns2.FirstOrDefault(p => p.PatternName == nameB);
+                if (patA != null && patB != null)
+                {
+                    var dateGap = Math.Abs((patA.EndDate - patB.EndDate).TotalDays);
+                    if (dateGap < 14)
+                    {
+                        if (patA.Confidence >= patB.Confidence)
+                            topPatterns.Remove(patB);
+                        else
+                            topPatterns.Remove(patA);
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"📊 After contradictions: 1H={topPatterns.Count(p => p.Timeframe == "1H")}, " +
+            $"4H={topPatterns.Count(p => p.Timeframe == "4H")}, " +
+            $"Daily={topPatterns.Count(p => p.Timeframe == "Daily")}, " +
+            $"Weekly={topPatterns.Count(p => p.Timeframe == "Weekly")}");
+        Console.WriteLine($"📊 Pattern details: {string.Join(" | ", topPatterns.Select(p => $"[{p.Timeframe}] {p.PatternName} {p.Confidence:F0}%"))}");
+
+        // ── General direction conflict: if multiple patterns on same timeframe
+        // within 7 days point in opposite directions, keep the higher confidence ones
+        var toRemove = new List<PatternResult>();
+        foreach (var p in topPatterns)
+        {
+            if (toRemove.Contains(p)) continue;
+            var conflicts = topPatterns.Where(other =>
+                other != p && !toRemove.Contains(other) &&
+                other.Timeframe == p.Timeframe &&
+                other.Direction != p.Direction &&
+                p.Direction != PatternDirection.Neutral &&
+                other.Direction != PatternDirection.Neutral &&
+                Math.Abs((other.EndDate - p.EndDate).TotalDays) < 7
+            ).ToList();
+
+            foreach (var c in conflicts)
+            {
+                if (c.Confidence < p.Confidence)
+                    toRemove.Add(c);
+            }
+        }
+        topPatterns.RemoveAll(p => toRemove.Contains(p));
 
         // ── Key price levels from daily ──────────────────────────────
         var keyLevels = DetectKeyLevels(candlesDaily);
@@ -170,7 +284,7 @@ public class PatternScannerController : ControllerBase
                 }
 
                 aiSynthesis = await _analyzer.SynthesizeMultiTimeframeAsync(
-                    topPatterns, timeframes, ctxDaily, combinedRegime, regimeConf, dirAlign, alignScore, symbol,
+                    topPatterns.Take(12).ToList(), timeframes, ctxDaily, combinedRegime, regimeConf, dirAlign, alignScore, symbol,
                     perfStats, userStats);
             }
             catch { /* AI unavailable */ }
@@ -225,6 +339,7 @@ public class PatternScannerController : ControllerBase
             Symbol = symbol,
             TotalPatterns = topPatterns.Count,
             CurrentPrice = price,
+            DataSource = _marketData.DataSource,
             // Combined multi-timeframe info
             CombinedRegime = combinedRegime,
             CombinedRegimeConfidence = Math.Round(regimeConf, 1),
@@ -244,31 +359,14 @@ public class PatternScannerController : ControllerBase
                 RSI = t.Context.RSI.HasValue ? Math.Round(t.Context.RSI.Value, 1) : null,
                 VolumeProfile = t.Context.VolumeProfile
             }).ToList(),
-            // Context layers
-            Context = new ContextDto
+            // Context layers — all timeframes + Daily as default
+            Context = MapContextDto(ctxDaily, "Daily", keyLevels),
+            TimeframeContexts = new List<ContextDto>
             {
-                VolumeRatio = Math.Round(ctxDaily.VolumeRatio, 1),
-                VolumeProfile = ctxDaily.VolumeProfile,
-                NearestSupport = ctxDaily.NearestSupport.HasValue ? Math.Round(ctxDaily.NearestSupport.Value, 2) : null,
-                NearestResistance = ctxDaily.NearestResistance.HasValue ? Math.Round(ctxDaily.NearestResistance.Value, 2) : null,
-                DistToSupportPct = ctxDaily.DistanceToSupportPct.HasValue ? Math.Round(ctxDaily.DistanceToSupportPct.Value, 1) : null,
-                DistToResistancePct = ctxDaily.DistanceToResistancePct.HasValue ? Math.Round(ctxDaily.DistanceToResistancePct.Value, 1) : null,
-                SMA20 = ctxDaily.SMA20.HasValue ? Math.Round(ctxDaily.SMA20.Value, 2) : null,
-                SMA50 = ctxDaily.SMA50.HasValue ? Math.Round(ctxDaily.SMA50.Value, 2) : null,
-                SMA200 = ctxDaily.SMA200.HasValue ? Math.Round(ctxDaily.SMA200.Value, 2) : null,
-                DistFromSMA200Pct = ctxDaily.DistFromSMA200Pct.HasValue ? Math.Round(ctxDaily.DistFromSMA200Pct.Value, 1) : null,
-                MAAlignment = ctxDaily.MAAlignment,
-                RSI = ctxDaily.RSI.HasValue ? Math.Round(ctxDaily.RSI.Value, 1) : null,
-                RSIZone = ctxDaily.RSIZone,
-                ATRPercent = ctxDaily.ATRPercent.HasValue ? Math.Round(ctxDaily.ATRPercent.Value, 2) : null,
-                ConsecutiveUpDays = ctxDaily.ConsecutiveUpDays,
-                ConsecutiveDownDays = ctxDaily.ConsecutiveDownDays,
-                KeyLevels = keyLevels.Take(6).Select(l => new KeyLevelDto
-                {
-                    Price = Math.Round(l.Price, 2),
-                    Type = l.Type,
-                    TouchCount = l.TouchCount
-                }).ToList()
+                MapContextDto(ctx1H, "1H", null),
+                MapContextDto(ctx4H, "4H", null),
+                MapContextDto(ctxDaily, "Daily", keyLevels),
+                MapContextDto(ctxWeekly, "Weekly", null)
             },
             // Patterns (deduplicated top)
             Patterns = topPatterns.Select(p =>
@@ -284,11 +382,15 @@ public class PatternScannerController : ControllerBase
                     Confidence = Math.Round(p.Confidence, 1),
                     HistoricalWinRate = p.HistoricalWinRate,
                     Description = p.Description,
-                    SuggestedEntry = Math.Round(p.SuggestedEntry, 2),
-                    SuggestedStop = Math.Round(p.SuggestedStop, 2),
-                    SuggestedTarget = Math.Round(p.SuggestedTarget, 2),
+                    // Prefer AI-recommended levels, fall back to detector's math
+                    // Validate AI levels are within 20% of current price, otherwise use detector levels
+                    SuggestedEntry = GetValidatedPrice(verdict?.Entry, p.SuggestedEntry, price),
+                    SuggestedStop = GetValidatedPrice(verdict?.Stop, p.SuggestedStop, price),
+                    SuggestedTarget = GetValidatedPrice(verdict?.Target, p.SuggestedTarget, price),
                     StartDate = p.StartDate,
                     EndDate = p.EndDate,
+                    StartCandleIndex = p.StartIndex,
+                    EndCandleIndex = p.EndIndex,
                     AIGrade = verdict?.Grade ?? "",
                     AIValid = verdict?.IsValid ?? true,
                     AIReason = verdict?.OneLineReason ?? ""
@@ -301,11 +403,49 @@ public class PatternScannerController : ControllerBase
                 Summary = aiSynthesis.Summary,
                 DetailedAnalysis = aiSynthesis.DetailedAnalysis,
                 RecommendedAction = aiSynthesis.RecommendedAction,
-                RecommendedEntry = aiSynthesis.RecommendedEntry,
-                RecommendedStop = aiSynthesis.RecommendedStop,
-                RecommendedTarget = aiSynthesis.RecommendedTarget,
+                // Validate AI recommended levels — use best pattern's detector levels as fallback
+                RecommendedEntry = ValidateAILevel(aiSynthesis.RecommendedEntry, price, topPatterns.FirstOrDefault()?.SuggestedEntry),
+                RecommendedStop = ValidateAILevel(aiSynthesis.RecommendedStop, price, topPatterns.FirstOrDefault()?.SuggestedStop),
+                RecommendedTarget = ValidateAILevel(aiSynthesis.RecommendedTarget, price, topPatterns.FirstOrDefault()?.SuggestedTarget),
                 RiskReward = aiSynthesis.RiskReward
-            } : null
+            } : null,
+            // Chart candle data — all three timeframes for client-side switching
+            ChartCandles = candlesDaily.TakeLast(120).Select(c => new CandleDto
+            {
+                Time = new DateTimeOffset(c.Time).ToUnixTimeSeconds(),
+                Open = Math.Round(c.Open, 2),
+                High = Math.Round(c.High, 2),
+                Low = Math.Round(c.Low, 2),
+                Close = Math.Round(c.Close, 2),
+                Volume = (long)c.Volume
+            }).ToList(),
+            ChartCandles1H = candles1H.TakeLast(120).Select(c => new CandleDto
+            {
+                Time = new DateTimeOffset(c.Time).ToUnixTimeSeconds(),
+                Open = Math.Round(c.Open, 2),
+                High = Math.Round(c.High, 2),
+                Low = Math.Round(c.Low, 2),
+                Close = Math.Round(c.Close, 2),
+                Volume = (long)c.Volume
+            }).ToList(),
+            ChartCandles4H = candles4H.TakeLast(120).Select(c => new CandleDto
+            {
+                Time = new DateTimeOffset(c.Time).ToUnixTimeSeconds(),
+                Open = Math.Round(c.Open, 2),
+                High = Math.Round(c.High, 2),
+                Low = Math.Round(c.Low, 2),
+                Close = Math.Round(c.Close, 2),
+                Volume = (long)c.Volume
+            }).ToList(),
+            ChartCandlesWeekly = candlesWeekly.TakeLast(104).Select(c => new CandleDto
+            {
+                Time = new DateTimeOffset(c.Time).ToUnixTimeSeconds(),
+                Open = Math.Round(c.Open, 2),
+                High = Math.Round(c.High, 2),
+                Low = Math.Round(c.Low, 2),
+                Close = Math.Round(c.Close, 2),
+                Volume = (long)c.Volume
+            }).ToList()
         });
     }
 
@@ -354,9 +494,17 @@ public class PatternScannerController : ControllerBase
     private MarketContext BuildMarketContext(List<Candle> candles, string timeframe)
     {
         var ctx = new MarketContext { Timeframe = timeframe };
-        if (candles.Count < 20) return ctx;
+        if (candles.Count < 20)
+        {
+            Console.WriteLine($"📊 BuildMarketContext {timeframe}: SKIPPED — only {candles.Count} candles (need 20+)");
+            return ctx;
+        }
 
         var closes = candles.Select(c => c.Close).ToList();
+        var uniqueCloses = closes.TakeLast(20).Distinct().Count();
+        Console.WriteLine($"📊 BuildMarketContext {timeframe}: {candles.Count} candles, " +
+            $"last close: {candles.Last().Close:F6}, unique in last 20: {uniqueCloses}, " +
+            $"vol: {candles.Last().Volume:F0}");
         var volumes = candles.Select(c => c.Volume).ToList();
         var last = candles.Last();
         ctx.CurrentPrice = last.Close;
@@ -553,6 +701,73 @@ public class PatternScannerController : ControllerBase
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// Maps internal MarketContext to ContextDto for API response.
+    /// Key levels are only attached to Daily (they apply cross-timeframe).
+    /// </summary>
+    private static ContextDto MapContextDto(MarketContext ctx, string timeframe, List<KeyPriceLevel>? keyLevels)
+    {
+        var decimals = ctx.CurrentPrice < 1m ? 6 : ctx.CurrentPrice < 10m ? 4 : 2;
+        return new ContextDto
+        {
+            Timeframe = timeframe,
+            VolumeRatio = Math.Round(ctx.VolumeRatio, 1),
+            VolumeProfile = ctx.VolumeProfile,
+            NearestSupport = ctx.NearestSupport.HasValue ? Math.Round(ctx.NearestSupport.Value, decimals) : null,
+            NearestResistance = ctx.NearestResistance.HasValue ? Math.Round(ctx.NearestResistance.Value, decimals) : null,
+            DistToSupportPct = ctx.DistanceToSupportPct.HasValue ? Math.Round(ctx.DistanceToSupportPct.Value, 1) : null,
+            DistToResistancePct = ctx.DistanceToResistancePct.HasValue ? Math.Round(ctx.DistanceToResistancePct.Value, 1) : null,
+            SMA20 = ctx.SMA20.HasValue ? Math.Round(ctx.SMA20.Value, decimals) : null,
+            SMA50 = ctx.SMA50.HasValue ? Math.Round(ctx.SMA50.Value, decimals) : null,
+            SMA200 = ctx.SMA200.HasValue ? Math.Round(ctx.SMA200.Value, decimals) : null,
+            DistFromSMA200Pct = ctx.DistFromSMA200Pct.HasValue ? Math.Round(ctx.DistFromSMA200Pct.Value, 1) : null,
+            MAAlignment = ctx.MAAlignment,
+            RSI = ctx.RSI.HasValue ? Math.Round(ctx.RSI.Value, 1) : null,
+            RSIZone = ctx.RSIZone,
+            ATRPercent = ctx.ATRPercent.HasValue ? Math.Round(ctx.ATRPercent.Value, 2) : null,
+            ConsecutiveUpDays = ctx.ConsecutiveUpDays,
+            ConsecutiveDownDays = ctx.ConsecutiveDownDays,
+            KeyLevels = keyLevels?.Take(6).Select(l => new KeyLevelDto
+            {
+                Price = Math.Round(l.Price, decimals),
+                Type = l.Type,
+                TouchCount = l.TouchCount
+            }).ToList() ?? new()
+        };
+    }
+
+    /// <summary>
+    /// Validates an AI-suggested price level against current price. Returns detector fallback if AI hallucinated.
+    /// Uses appropriate decimal precision for low-price assets.
+    /// </summary>
+    private static decimal GetValidatedPrice(decimal? aiPrice, decimal detectorPrice, decimal currentPrice)
+    {
+        var maxDrift = currentPrice * 0.20m; // 20% tolerance
+        var decimals = currentPrice < 1m ? 6 : currentPrice < 10m ? 4 : 2;
+
+        if (aiPrice.HasValue && aiPrice.Value > 0 && Math.Abs(aiPrice.Value - currentPrice) <= maxDrift)
+            return Math.Round(aiPrice.Value, decimals);
+
+        return Math.Round(detectorPrice, decimals);
+    }
+
+    /// <summary>
+    /// Validates AI recommended entry/stop/target for the overall analysis. Falls back to detector price.
+    /// </summary>
+    private static decimal? ValidateAILevel(decimal? aiLevel, decimal currentPrice, decimal? detectorFallback)
+    {
+        var maxDrift = currentPrice * 0.20m;
+        var decimals = currentPrice < 1m ? 6 : currentPrice < 10m ? 4 : 2;
+
+        if (aiLevel.HasValue && aiLevel.Value > 0 && Math.Abs(aiLevel.Value - currentPrice) <= maxDrift)
+            return Math.Round(aiLevel.Value, decimals);
+
+        if (detectorFallback.HasValue && detectorFallback.Value > 0)
+            return Math.Round(detectorFallback.Value, decimals);
+
+        return null;
+    }
+
     private List<PatternResult> DeduplicatePatterns(List<PatternResult> patterns)
     {
         return patterns
@@ -583,7 +798,7 @@ public class PatternScannerController : ControllerBase
 
     private (string regime, decimal confidence, string alignment) CombineRegimes(List<TimeframeData> timeframes)
     {
-        // Weighted vote: Weekly 3x, Daily 2x, 4H 1x
+        // Weighted vote: Weekly 3x, Daily 2x, 1H 1x
         var regimeVotes = new Dictionary<string, decimal>();
         var totalWeight = 0m;
 
@@ -615,7 +830,7 @@ public class PatternScannerController : ControllerBase
 
     private (string alignment, decimal score) CalculateDirectionAlignment(List<TimeframeData> timeframes)
     {
-        // Weighted direction score: Weekly 3x, Daily 2x, 4H 1x
+        // Weighted direction score: Weekly 3x, Daily 2x, 1H 1x
         var bullishScore = 0m;
         var bearishScore = 0m;
 
@@ -642,77 +857,6 @@ public class PatternScannerController : ControllerBase
         return (alignment, dominantPct);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // SAMPLE CANDLE GENERATION
-    // ═══════════════════════════════════════════════════════════════════
-
-    private List<Candle> GenerateSampleCandles(string symbol, int count, string timeframe)
-    {
-        var candles = new List<Candle>();
-        var random = new Random(symbol.GetHashCode() + timeframe.GetHashCode());
-
-        var basePrice = symbol.ToUpper() switch
-        {
-            "TSLA" => 410m,
-            "AAPL" => 225m,
-            "MSFT" => 420m,
-            "GOOGL" => 175m,
-            "AMZN" => 200m,
-            "NVDA" => 870m,
-            "META" => 590m,
-            "BTC" => 95000m,
-            "COIN" => 250m,
-            _ => 150m
-        };
-
-        // Volatility scale by timeframe
-        var volScale = timeframe switch
-        {
-            "4H" => 0.008m,
-            "Weekly" => 0.035m,
-            _ => 0.02m  // Daily
-        };
-
-        var price = basePrice * 0.85m;
-
-        for (int i = count; i >= 0; i--)
-        {
-            DateTime date;
-            if (timeframe == "4H")
-            {
-                date = DateTime.Today.AddHours(-i * 4);
-                if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday) continue;
-            }
-            else if (timeframe == "Weekly")
-            {
-                date = DateTime.Today.AddDays(-i * 7);
-            }
-            else
-            {
-                date = DateTime.Today.AddDays(-i);
-                if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday) continue;
-            }
-
-            var change = (decimal)(random.NextDouble() - 0.47) * basePrice * volScale;
-            var open = price;
-            var close = price + change;
-            var high = Math.Max(open, close) + (decimal)random.NextDouble() * basePrice * volScale * 0.4m;
-            var low = Math.Min(open, close) - (decimal)random.NextDouble() * basePrice * volScale * 0.4m;
-            var volume = (5000000m + (decimal)random.Next(0, 15000000)) * (timeframe == "Weekly" ? 5 : timeframe == "4H" ? 0.25m : 1);
-
-            candles.Add(new Candle
-            {
-                Time = date,
-                Open = Math.Round(open, 2),
-                High = Math.Round(high, 2),
-                Low = Math.Round(low, 2),
-                Close = Math.Round(close, 2),
-                Volume = volume
-            });
-            price = close;
-        }
-        return candles;
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -733,6 +877,7 @@ public class ScanResponse
     public string Symbol { get; set; } = "";
     public int TotalPatterns { get; set; }
     public decimal CurrentPrice { get; set; }
+    public string DataSource { get; set; } = ""; // "Alpaca" or "Sample Data"
 
     // Multi-timeframe
     public string CombinedRegime { get; set; } = "";
@@ -744,10 +889,27 @@ public class ScanResponse
 
     // Context
     public ContextDto? Context { get; set; }
+    public List<ContextDto> TimeframeContexts { get; set; } = new();
 
     // Patterns + AI
     public List<PatternDto> Patterns { get; set; } = new();
     public AIAnalysisDto? AIAnalysis { get; set; }
+
+    // Chart data (last 120 daily candles for pattern overlay chart)
+    public List<CandleDto> ChartCandles { get; set; } = new();
+    public List<CandleDto> ChartCandles1H { get; set; } = new();
+    public List<CandleDto> ChartCandles4H { get; set; } = new();
+    public List<CandleDto> ChartCandlesWeekly { get; set; } = new();
+}
+
+public class CandleDto
+{
+    public long Time { get; set; }   // Unix timestamp
+    public decimal Open { get; set; }
+    public decimal High { get; set; }
+    public decimal Low { get; set; }
+    public decimal Close { get; set; }
+    public long Volume { get; set; }
 }
 
 public class TimeframeSummaryDto
@@ -765,6 +927,7 @@ public class TimeframeSummaryDto
 
 public class ContextDto
 {
+    public string Timeframe { get; set; } = "Daily";
     public decimal VolumeRatio { get; set; }
     public string VolumeProfile { get; set; } = "";
     public decimal? NearestSupport { get; set; }
@@ -805,6 +968,8 @@ public class PatternDto
     public decimal SuggestedTarget { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
+    public int StartCandleIndex { get; set; }
+    public int EndCandleIndex { get; set; }
     public string AIGrade { get; set; } = "";
     public bool AIValid { get; set; } = true;
     public string AIReason { get; set; } = "";
