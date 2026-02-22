@@ -128,6 +128,12 @@
                         <div>
                             <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; color: var(--text-heading);">@t.Asset</span>
                             <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.05); color: @dirColor; margin-left: 6px;">@t.Direction</span>
+                            @if (t.Source == "AI")
+                            {
+                                <span style="font-size: 0.55rem; padding: 1px 6px; border-radius: 8px; background: rgba(99,102,241,0.2); color: var(--accent-purple); margin-left: 4px; font-weight: 600;">
+                                    <i class="ph-bold ph-robot" style="margin-right: 2px;"></i>AI
+                                </span>
+                            }
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span style="font-size: 0.7rem; color: var(--text-muted);">Day @t.DaysHeld / @t.MaxExpirationDays</span>
@@ -202,6 +208,7 @@
                     <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">
                         <th style="padding: 8px; text-align: left;">Asset</th>
                         <th style="padding: 8px;">Dir</th>
+                        <th style="padding: 8px;">Source</th>
                         <th style="padding: 8px;">Outcome</th>
                         <th style="padding: 8px;">P&L</th>
                         <th style="padding: 8px;">R-Mult</th>
@@ -219,22 +226,36 @@
                     {
                         var outcomeColor = t.Outcome switch
                         {
-                                        "HitTarget1" or "HitTarget2" => "var(--accent-green)",
-                                        "HitStop" => "var(--accent-red)",
+                                                    "HitTarget1" or "HitTarget2" => "var(--accent-green)",
+                                                    "HitStop" => "var(--accent-red)",
                             _ => "var(--accent-amber)"
                         };
                         var pnlColor = (t.PnLPercent ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)";
                         var outcomeLabel = t.Outcome switch
                         {
-                                        "HitTarget1" => "✓ Target",
-                                        "HitTarget2" => "✓ Target 2",
-                                        "HitStop" => "✗ Stopped",
-                                        "Expired" => "⏱ Expired",
+                                                    "HitTarget1" => "✓ Target",
+                                                    "HitTarget2" => "✓ Target 2",
+                                                    "HitStop" => "✗ Stopped",
+                                                    "Expired" => "⏱ Expired",
                             _ => t.Outcome ?? "—"
                         };
                         <tr style="border-bottom: 1px solid var(--border);">
                             <td style="padding: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-heading);">@t.Asset</td>
                             <td style="padding: 8px; text-align: center; color: @(t.Direction == "Long" ? "var(--accent-green)" : "var(--accent-red)");">@t.Direction</td>
+                            <td style="padding: 8px; text-align: center;">
+                                @if (t.Source == "AI")
+                                {
+                                    <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: rgba(99,102,241,0.2); color: var(--accent-purple); font-weight: 600;">
+                                        <i class="ph-bold ph-robot" style="margin-right: 2px;"></i>AI
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: rgba(6,182,212,0.15); color: var(--accent-cyan); font-weight: 600;">
+                                        <i class="ph-bold ph-user" style="margin-right: 2px;"></i>Manual
+                                    </span>
+                                }
+                            </td>
                             <td style="padding: 8px; text-align: center; color: @outcomeColor; font-weight: 600;">@outcomeLabel</td>
                             <td style="padding: 8px; text-align: center; font-family: 'JetBrains Mono', monospace; color: @pnlColor; font-weight: 700;">@(t.PnLPercent?.ToString("+0.0;-0.0") ?? "—")%</td>
                             <td style="padding: 8px; text-align: center; font-family: 'JetBrains Mono', monospace; color: @pnlColor;">@(t.RMultiple?.ToString("+0.0;-0.0") ?? "—")R</td>

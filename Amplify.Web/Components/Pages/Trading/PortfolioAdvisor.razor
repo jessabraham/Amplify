@@ -3,9 +3,11 @@
 @inject PortfolioAdvisorApiClient AdvisorApi
 @inject SettingsApiClient SettingsApi
 @inject WatchlistApiClient WatchlistApi
+@inject PortfolioApiClient PortfolioApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
 @using Amplify.Web.Services
+@using Amplify.Application.Common.DTOs.Trading
 @using System.Text.Json
 
 <div class="fade-in">
@@ -70,6 +72,30 @@
 
     @if (_result is not null)
     {
+        @if (_rehydratedFrom is not null)
+        {
+            var adviceAge = DateTime.UtcNow - _rehydratedFrom.Value;
+            var freshnessColor = adviceAge.TotalHours < 6 ? "var(--accent-green)" : adviceAge.TotalHours < 24 ? "var(--accent-cyan)" : adviceAge.TotalDays < 3 ? "var(--accent-amber)" : "var(--accent-red)";
+            var freshnessLabel = adviceAge.TotalHours < 6 ? "Fresh" : adviceAge.TotalHours < 24 ? "Recent" : adviceAge.TotalDays < 3 ? "Aging" : "Stale";
+            <div class="card" style="border-left: 3px solid @freshnessColor; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 0.65rem; padding: 2px 8px; border-radius: 10px; background: @freshnessColor; color: white;">@freshnessLabel</span>
+                    <span style="color: var(--text-body); font-size: 0.85rem;">
+                        Advice from <strong>@_rehydratedFrom.Value.ToLocalTime().ToString("MMM dd, h:mm tt")</strong>
+                        <span style="color: var(--text-muted); margin-left: 4px;">(@FormatAge(adviceAge) ago)</span>
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    @if (adviceAge.TotalHours >= 24)
+                    {
+                        <span style="font-size: 0.75rem; color: var(--accent-amber);"><i class="ph-light ph-warning" style="margin-right: 4px;"></i>Prices may have changed</span>
+                    }
+                    <button class="btn btn-secondary btn-sm" @onclick="DismissRehydrated">
+                        <i class="ph ph-x" style="margin-right: 4px;"></i>Dismiss
+                    </button>
+                </div>
+            </div>
+        }
         <!-- AI Summary -->
         <div class="card" style="border-left: 3px solid var(--accent-cyan); margin-bottom: 20px;">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
@@ -119,14 +145,22 @@
                     var dirClass = alloc.Direction.ToLower() == "short" ? "short" : "long";
                     var confColor = alloc.Confidence switch
                     {
-                                        "High" => "var(--accent-green)",
-                                        "Low" => "var(--accent-red)",
+                                                        "High" => "var(--accent-green)",
+                                                        "Low" => "var(--accent-red)",
                         _ => "var(--accent-amber)"
                     };
 
                     <div class="signal-card @dirClass" style="@(isSkip ? "opacity: 0.5;" : "")">
                         <div class="signal-card-header">
-                            <span class="signal-asset">@alloc.Symbol</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="signal-asset">@alloc.Symbol</span>
+                                @if (!isSkip && _aiPositionSymbols.Contains(alloc.Symbol))
+                                {
+                                    <span style="font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: rgba(99, 102, 241, 0.2); color: var(--accent-purple); font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                                        <i class="ph-bold ph-robot"></i> AI Executed
+                                    </span>
+                                }
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 @if (!isSkip)
                                 {
@@ -209,10 +243,23 @@
     {
         <div style="margin-top: 24px;">
             <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 12px;">
-                <i class="ph-duotone ph-clock-counter-clockwise" style="margin-right: 6px; color: var(--text-muted);"></i>Past Advice (@_history.Count)
+                <i class="ph-duotone ph-clock-counter-clockwise" style="margin-right: 6px; color: var(--text-muted);"></i>Past Advice
             </div>
 
-            @foreach (var item in _history)
+            @{
+                // Don't show the currently-displayed advice in history (avoid duplication)
+                var historyToShow = _rehydratedFrom is not null
+                ? _history.Where(h => h.CreatedAt != _rehydratedFrom.Value).ToList()
+                : _history.Skip(_result is not null && _history.Any() && Math.Abs((_history.First().CreatedAt - (_rehydratedFrom ?? DateTime.MinValue)).TotalSeconds) < 60 ? 0 : 0).ToList();
+
+                // If the live result matches the most recent history item, skip it
+                if (_result is not null && _rehydratedFrom is not null && _history.Any())
+                {
+                    historyToShow = _history.Where(h => Math.Abs((h.CreatedAt - _rehydratedFrom.Value).TotalSeconds) > 60).ToList();
+                }
+            }
+
+            @foreach (var item in historyToShow)
             {
                 var isExpanded = _expandedHistoryId == item.Id;
                 <div class="card" style="margin-bottom: 8px; cursor: pointer;" @onclick="() => ToggleHistory(item.Id)">
@@ -234,29 +281,104 @@
                     @if (isExpanded)
                     {
                         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.8rem;">
-                            <div style="display: flex; gap: 20px; color: var(--text-muted); margin-bottom: 8px;">
-                                <span>Cash: @item.CashAvailable.ToString("C0")</span>
-                                <span>Invested: @item.TotalInvested.ToString("C0")</span>
-                                <span>Positions: @item.OpenPositionCount</span>
-                                <span>Watchlist: @item.WatchlistCount</span>
-                                <span>Allocations: @item.TotalAllocations</span>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <div style="display: flex; gap: 20px; color: var(--text-muted);">
+                                    <span>Cash: @item.CashAvailable.ToString("C0")</span>
+                                    <span>Invested: @item.TotalInvested.ToString("C0")</span>
+                                    <span>Positions: @item.OpenPositionCount</span>
+                                    <span>Watchlist: @item.WatchlistCount</span>
+                                    <span>Allocations: @item.TotalAllocations</span>
+                                </div>
+                                <button class="btn btn-secondary btn-sm" @onclick:stopPropagation="true" @onclick="() => RehydrateAdvice(item)">
+                                    <i class="ph ph-arrow-counter-clockwise" style="margin-right: 4px;"></i>Load Full View
+                                </button>
                             </div>
                             @{
                                 var allocations = ParseAllocations(item.ResponseJson);
+                                var executedCount = 0;
                             }
                             @if (allocations.Any())
                             {
-                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 8px;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 8px;">
                                     @foreach (var a in allocations)
                                     {
-                                        <div style="padding: 8px 12px; border-radius: 6px; background: var(--bg-card-hover);">
-                                            <div style="display: flex; justify-content: space-between;">
+                                        var aSkip = a.Skip;
+                                        var aDirClass = a.Direction.ToLower() == "short" ? "short" : "long";
+                                        var matchedPosition = !aSkip ? FindMatchingPosition(a.Symbol, item.CreatedAt) : null;
+                                        var wasExecuted = matchedPosition is not null;
+                                        if (wasExecuted) executedCount++;
+                                        var wasAi = wasExecuted && matchedPosition!.IsAiGenerated;
+                                        var isOpen = wasExecuted && matchedPosition!.Status == Amplify.Domain.Enumerations.PositionStatus.Open;
+                                        var pnl = wasExecuted ? matchedPosition!.UnrealizedPnL + matchedPosition.RealizedPnL : 0;
+                                        var pnlColor = pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+
+                                        <div style="padding: 10px 12px; border-radius: 6px; background: var(--bg-card-hover); @(aSkip ? "opacity: 0.5;" : "") @(wasExecuted ? "border-left: 3px solid " + (wasAi ? "var(--accent-purple)" : "var(--accent-cyan)") + ";" : "")">
+                                            <div style="display: flex; justify-content: space-between; align-items: center;">
                                                 <span style="font-weight: 600;">@a.Symbol</span>
-                                                <span style="color: var(--accent-cyan); font-weight: 600;">@a.SuggestedBudget.ToString("C0")</span>
+                                                <div style="display: flex; align-items: center; gap: 6px;">
+                                                    @if (!aSkip)
+                                                    {
+                                                        <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: @(aDirClass == "long" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)"); color: @(aDirClass == "long" ? "var(--accent-green)" : "var(--accent-red)");">@a.Direction</span>
+                                                    }
+                                                    <span style="color: var(--accent-cyan); font-weight: 600;">@a.SuggestedBudget.ToString("C0")</span>
+                                                </div>
                                             </div>
-                                            <div style="font-size: 0.7rem; color: var(--text-muted);">@a.Direction · @a.Confidence</div>
+
+                                            @* Execution status *@
+                                            @if (aSkip)
+                                            {
+                                                <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 4px;">
+                                                    <i class="ph-light ph-skip-forward" style="margin-right: 2px;"></i>@(a.SkipReason ?? "Skipped")
+                                                </div>
+                                            }
+                                            else if (wasExecuted)
+                                            {
+                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                                                    <span style="font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px;
+                                                                                background: @(wasAi ? "rgba(99,102,241,0.15)" : "rgba(6,182,212,0.15)");
+                                                                                color: @(wasAi ? "var(--accent-purple)" : "var(--accent-cyan)");">
+                                                        <i class="ph-bold @(wasAi ? "ph-robot" : "ph-user")"></i>
+                                                        @(wasAi ? "AI Executed" : "You Executed")
+                                                    </span>
+                                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                                        @if (isOpen)
+                                                        {
+                                                            <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: rgba(16,185,129,0.15); color: var(--accent-green);">Open</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: rgba(107,114,128,0.15); color: var(--text-muted);">Closed</span>
+                                                        }
+                                                        <span style="font-size: 0.75rem; font-weight: 600; color: @pnlColor; font-family: 'JetBrains Mono', monospace;">
+                                                            @(pnl >= 0 ? "+" : "")@pnl.ToString("C0")
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">
+                                                    Entry: @matchedPosition!.EntryPrice.ToString("C2") · Qty: @matchedPosition.Quantity
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                                                    <span style="font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: rgba(107,114,128,0.1); color: var(--text-muted); font-weight: 600;">
+                                                        <i class="ph-light ph-minus-circle" style="margin-right: 2px;"></i>Not Executed
+                                                    </span>
+                                                    <a href="/planner?symbol=@a.Symbol&budget=@((int)a.SuggestedBudget)"
+                                                       class="btn btn-secondary btn-sm"
+                                                       @onclick:stopPropagation="true"
+                                                       style="font-size: 0.65rem; padding: 2px 8px;">
+                                                        <i class="ph-bold ph-arrow-right" style="margin-right: 2px;"></i>Trade Planner
+                                                    </a>
+                                                </div>
+                                            }
                                         </div>
                                     }
+                                </div>
+
+                                @* Summary line *@
+                                <div style="margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);">
+                                    @executedCount / @allocations.Count(a => !a.Skip) allocations executed
                                 </div>
                             }
                         </div>
@@ -279,6 +401,13 @@
     // History
     private List<AdviceHistoryItem> _history = new();
     private Guid? _expandedHistoryId;
+    private DateTime? _rehydratedFrom;
+
+    // AI-executed positions (for badge display)
+    private HashSet<string> _aiPositionSymbols = new(StringComparer.OrdinalIgnoreCase);
+
+    // All positions for matching against past advice
+    private List<PositionDto> _allPositions = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -298,6 +427,43 @@
             var watchlist = await WatchlistApi.GetWatchlistAsync();
             _watchlistCount = watchlist.Count(w => w.IsActive);
             _history = await AdvisorApi.GetAdviceHistoryAsync(10);
+
+            // Load AI-generated open positions for badge display
+            try
+            {
+                var openPositions = await PortfolioApi.GetOpenPositionsAsync();
+                var closedPositions = await PortfolioApi.GetClosedPositionsAsync();
+                _allPositions = openPositions.Concat(closedPositions).ToList();
+                _aiPositionSymbols = new HashSet<string>(
+                    openPositions.Where(p => p.IsAiGenerated).Select(p => p.Symbol),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+            catch { }
+
+            // Auto-load the most recent advice if it's still fresh
+            if (_history.Any() && _result is null)
+            {
+                var latest = _history.First();
+                var age = DateTime.UtcNow - latest.CreatedAt;
+
+                // Keep advice alive based on reasonable staleness thresholds
+                // Under 24h = always show, under 7 days = show with "stale" indicator
+                if (age.TotalDays < 7)
+                {
+                    try
+                    {
+                        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                        var parsed = JsonSerializer.Deserialize<PortfolioAllocationResult>(latest.ResponseJson, options);
+                        if (parsed is not null)
+                        {
+                            _result = parsed;
+                            _rehydratedFrom = latest.CreatedAt;
+                            _hasRun = true;
+                        }
+                    }
+                    catch { }
+                }
+            }
         }
         catch { }
 
@@ -310,6 +476,7 @@
         _error = null;
         _result = null;
         _hasRun = true;
+        _rehydratedFrom = null;
         StateHasChanged();
 
         try
@@ -318,9 +485,19 @@
             if (_result is null)
                 _error = "Failed to get AI advice. Make sure Ollama is running and you have symbols in your watchlist.";
 
-            // Refresh balance + history
+            // Refresh balance + history + AI positions
             _balance = await SettingsApi.GetPortfolioBalanceAsync();
             _history = await AdvisorApi.GetAdviceHistoryAsync(10);
+            try
+            {
+                var openPositions = await PortfolioApi.GetOpenPositionsAsync();
+                var closedPositions = await PortfolioApi.GetClosedPositionsAsync();
+                _allPositions = openPositions.Concat(closedPositions).ToList();
+                _aiPositionSymbols = new HashSet<string>(
+                    openPositions.Where(p => p.IsAiGenerated).Select(p => p.Symbol),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+            catch { }
         }
         catch (TaskCanceledException)
         {
@@ -344,9 +521,60 @@
         _ => "var(--accent-amber)"
     };
 
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h";
+        return $"{(int)age.TotalDays}d";
+    }
+
+    /// <summary>
+    /// Find a position that was likely created from this advice allocation.
+    /// Matches by symbol + created within 12 hours after the advice was generated.
+    /// </summary>
+    private PositionDto? FindMatchingPosition(string symbol, DateTime adviceCreatedAt)
+    {
+        var windowEnd = adviceCreatedAt.AddHours(12);
+        return _allPositions
+            .Where(p => p.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)
+                && p.CreatedAt >= adviceCreatedAt.AddMinutes(-5) // small buffer
+                && p.CreatedAt <= windowEnd)
+            .OrderBy(p => p.CreatedAt)
+            .FirstOrDefault();
+    }
+
     private void ToggleHistory(Guid id)
     {
         _expandedHistoryId = _expandedHistoryId == id ? null : id;
+    }
+
+    private void RehydrateAdvice(AdviceHistoryItem item)
+    {
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var parsed = JsonSerializer.Deserialize<PortfolioAllocationResult>(item.ResponseJson, options);
+            if (parsed is not null)
+            {
+                _result = parsed;
+                _rehydratedFrom = item.CreatedAt;
+                _hasRun = true;
+                _error = null;
+            }
+        }
+        catch
+        {
+            _error = "Failed to load past advice — the stored data may be in an unexpected format.";
+        }
+        StateHasChanged();
+    }
+
+    private void DismissRehydrated()
+    {
+        _result = null;
+        _rehydratedFrom = null;
+        _hasRun = false;
+        StateHasChanged();
     }
 
     private static List<AllocationSuggestion> ParseAllocations(string responseJson)

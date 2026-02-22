@@ -86,6 +86,7 @@ public class SimulationController : ControllerBase
             t.HighestPriceSeen,
             t.LowestPriceSeen,
             Status = t.Status.ToString(),
+            Source = t.TradeSignal?.Source.ToString() ?? "Manual",
             t.CreatedAt
         }));
     }
@@ -121,6 +122,7 @@ public class SimulationController : ControllerBase
             t.AIRecommendedAction,
             t.PatternConfidence,
             MaxDrawdown = t.MaxDrawdownPercent,
+            Source = t.TradeSignal?.Source.ToString() ?? "Manual",
             t.CreatedAt,
             t.ResolvedAt
         }));

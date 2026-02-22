@@ -154,6 +154,7 @@ public class SimulatedTradeDto
     public decimal? PatternConfidence { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ResolvedAt { get; set; }
+    public string? Source { get; set; }  // "AI" or "Manual"
 }
 
 public class ResolveResultDto

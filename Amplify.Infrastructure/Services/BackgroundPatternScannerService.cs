@@ -187,23 +187,61 @@ public class BackgroundPatternScannerService : BackgroundService
         // Use IMarketDataService (Alpaca → sample data fallback)
         var marketData = scope.ServiceProvider
             .GetRequiredService<Amplify.Application.Common.Interfaces.Market.IMarketDataService>();
-        var candles = await marketData.GetCandlesAsync(item.Symbol, 250, "Daily");
-        if (candles.Count == 0) return;
 
-        // Detect patterns (math-only, always fast)
-        var patterns = detector.DetectAll(candles);
+        // ── Scan multiple timeframes ──────────────────────────────────
+        var timeframesToScan = new[] { ("1H", 200, PatternTimeframe.OneHour), ("4H", 200, PatternTimeframe.FourHour), ("Daily", 250, PatternTimeframe.Daily), ("Weekly", 104, PatternTimeframe.Weekly) };
+        var allPatterns = new List<(Application.Common.Models.PatternResult Pattern, PatternTimeframe Timeframe, decimal LastClose)>();
+        List<Application.Common.Models.Candle> dailyCandles = new();
 
-        if (item.MinConfidence > 0)
-            patterns = patterns.Where(p => p.Confidence >= item.MinConfidence).ToList();
+        foreach (var (tf, count, ptf) in timeframesToScan)
+        {
+            try
+            {
+                var candles = await marketData.GetCandlesAsync(item.Symbol, count, tf);
+                if (candles.Count == 0) continue;
+
+                if (tf == "Daily") dailyCandles = candles;
+
+                var patterns = detector.DetectAll(candles);
+                if (item.MinConfidence > 0)
+                    patterns = patterns.Where(p => p.Confidence >= item.MinConfidence).ToList();
+
+                // Apply timeframe confidence scaling (same as manual scanner)
+                foreach (var p in patterns)
+                {
+                    p.Timeframe = tf;
+                    p.Confidence = ptf switch
+                    {
+                        PatternTimeframe.OneHour => Math.Min(p.Confidence * 0.85m, 95),
+                        PatternTimeframe.FourHour => Math.Min(p.Confidence * 0.90m, 95),
+                        PatternTimeframe.Weekly => Math.Min(p.Confidence * 1.05m, 98),
+                        _ => p.Confidence
+                    };
+                }
+
+                foreach (var p in patterns)
+                    allPatterns.Add((p, ptf, candles.Last().Close));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to fetch {Timeframe} candles for {Symbol}", tf, item.Symbol);
+            }
+        }
+
+        if (!allPatterns.Any()) return;
+
+        // Use daily candles for AI synthesis (most balanced view)
+        var candlesForAI = dailyCandles.Any() ? dailyCandles : allPatterns.Select(a => a.Pattern).ToList() is { } _ ? new List<Application.Common.Models.Candle>() : new();
+        var patternsForAI = allPatterns.Select(a => a.Pattern).ToList();
 
         // Run AI synthesis with semaphore to prevent GPU flooding
         MultiPatternAnalysis? aiSynthesis = null;
-        if (patterns.Any() && useAI)
+        if (patternsForAI.Any() && useAI && candlesForAI.Any())
         {
             await _aiSemaphore.WaitAsync(ct);
             try
             {
-                aiSynthesis = await analyzer.SynthesizePatternsAsync(patterns, candles, item.Symbol);
+                aiSynthesis = await analyzer.SynthesizePatternsAsync(patternsForAI, candlesForAI, item.Symbol);
             }
             catch (Exception ex)
             {
@@ -217,7 +255,7 @@ public class BackgroundPatternScannerService : BackgroundService
 
         // Update watchlist item metadata
         item.LastScannedAt = DateTime.UtcNow;
-        item.LastPatternCount = patterns.Count;
+        item.LastPatternCount = allPatterns.Count;
         item.LastBias = aiSynthesis?.OverallBias;
         item.UpdatedAt = DateTime.UtcNow;
 
@@ -233,11 +271,11 @@ public class BackgroundPatternScannerService : BackgroundService
             existingActive.Select(e => $"{e.PatternType}|{e.Timeframe}"));
 
         var newPatternsAdded = 0;
-        foreach (var p in patterns)
+        foreach (var (p, ptf, lastClose) in allPatterns)
         {
-            var key = $"{p.PatternType}|{PatternTimeframe.Daily}";
+            var key = $"{p.PatternType}|{ptf}";
             if (existingSet.Contains(key))
-                continue; // Skip — already have an active pattern of this type
+                continue; // Skip — already have an active pattern of this type+timeframe
 
             existingSet.Add(key); // Prevent duplicates within this batch too
 
@@ -249,11 +287,11 @@ public class BackgroundPatternScannerService : BackgroundService
                 Asset = item.Symbol,
                 PatternType = p.PatternType,
                 Direction = p.Direction,
-                Timeframe = PatternTimeframe.Daily,
+                Timeframe = ptf,
                 Confidence = p.Confidence,
                 HistoricalWinRate = p.HistoricalWinRate,
                 Description = p.Description,
-                DetectedAtPrice = candles.Last().Close,
+                DetectedAtPrice = lastClose,
                 SuggestedEntry = p.SuggestedEntry,
                 SuggestedStop = p.SuggestedStop,
                 SuggestedTarget = p.SuggestedTarget,
@@ -262,21 +300,21 @@ public class BackgroundPatternScannerService : BackgroundService
                 AIAnalysis = verdict is not null ? $"[{verdict.Grade}] {verdict.OneLineReason}" : null,
                 AIConfidence = aiSynthesis?.OverallConfidence,
                 Status = PatternStatus.Active,
-                ExpiresAt = DetectedPattern.CalculateExpiry(PatternTimeframe.Daily, DateTime.UtcNow),
-                CurrentPrice = candles.Last().Close,
+                ExpiresAt = DetectedPattern.CalculateExpiry(ptf, DateTime.UtcNow),
+                CurrentPrice = lastClose,
                 UserId = item.UserId
             });
             newPatternsAdded++;
         }
 
-        if (newPatternsAdded < patterns.Count)
+        if (newPatternsAdded < allPatterns.Count)
         {
             _logger.LogDebug("📋 {Symbol}: {New}/{Total} patterns added ({Skipped} duplicates skipped)",
-                item.Symbol, newPatternsAdded, patterns.Count, patterns.Count - newPatternsAdded);
+                item.Symbol, newPatternsAdded, allPatterns.Count, allPatterns.Count - newPatternsAdded);
         }
 
         // Build notification
-        var topPattern = patterns.OrderByDescending(p => p.Confidence).FirstOrDefault();
+        var topPattern = allPatterns.OrderByDescending(a => a.Pattern.Confidence).Select(a => a.Pattern).FirstOrDefault();
         var isAlert = topPattern is not null
             && topPattern.Confidence >= 75
             && (aiSynthesis?.OverallConfidence ?? 0) >= 70;
@@ -311,6 +349,11 @@ public class BackgroundPatternScannerService : BackgroundService
 
                 if (!recentTrade)
                 {
+                    var topPatternTf = allPatterns
+                        .Where(a => a.Pattern == topPattern)
+                        .Select(a => a.Timeframe.ToString())
+                        .FirstOrDefault() ?? "Daily";
+
                     // Create TradeSignal first (the signal is the parent record)
                     var signal = new TradeSignal
                     {
@@ -323,7 +366,7 @@ public class BackgroundPatternScannerService : BackgroundService
                         Target1 = aiSynthesis.RecommendedTarget.Value,
                         Regime = MarketRegime.Trending,
                         PatternName = topPattern?.PatternType.ToString(),
-                        PatternTimeframe = "Daily",
+                        PatternTimeframe = topPatternTf,
                         PatternConfidence = topPattern?.Confidence,
                         AIConfidence = aiSynthesis.OverallConfidence,
                         AIRecommendedAction = aiSynthesis.RecommendedAction,
@@ -340,7 +383,7 @@ public class BackgroundPatternScannerService : BackgroundService
                     {
                         PatternType = topPattern!.PatternType.ToString(),
                         PatternDirection = topPattern.Direction.ToString(),
-                        PatternTimeframe = "Daily",
+                        PatternTimeframe = topPatternTf,
                         PatternConfidence = topPattern.Confidence
                     });
 
@@ -361,11 +404,13 @@ public class BackgroundPatternScannerService : BackgroundService
             }
         }
 
+        var latestPrice = allPatterns.LastOrDefault().LastClose;
+
         var notification = new ScanNotification
         {
             Symbol = item.Symbol,
-            PatternCount = patterns.Count,
-            CurrentPrice = candles.Last().Close,
+            PatternCount = allPatterns.Count,
+            CurrentPrice = latestPrice,
             OverallBias = aiSynthesis?.OverallBias,
             AIConfidence = aiSynthesis?.OverallConfidence,
             RecommendedAction = aiSynthesis?.RecommendedAction,
@@ -385,8 +430,8 @@ public class BackgroundPatternScannerService : BackgroundService
             await notifier.NotifyPatternAlertAsync(item.UserId, notification);
 
         _logger.LogInformation(
-            "Scanned {Symbol}: {Count} patterns, bias={Bias}, AI={AI}",
-            item.Symbol, patterns.Count, aiSynthesis?.OverallBias ?? "N/A", useAI ? "yes" : "skipped");
+            "Scanned {Symbol}: {Count} patterns (1H/4H/D/W), bias={Bias}, AI={AI}",
+            item.Symbol, allPatterns.Count, aiSynthesis?.OverallBias ?? "N/A", useAI ? "yes" : "skipped");
     }
 
     /// <summary>
@@ -593,6 +638,121 @@ public class BackgroundPatternScannerService : BackgroundService
 
                         _logger.LogInformation("🧠 Auto-ran Portfolio Advisor for user {UserId}: {Allocations} allocations, ${Total:N0} suggested",
                             userId, advice.TotalAllocations, advice.TotalSuggestedAllocation);
+
+                        // ═══════════════════════════════════════════════════════════════
+                        // AUTO-EXECUTE: Create positions from advisor allocations
+                        // Only if user has AI trading budget > 0%
+                        // ═══════════════════════════════════════════════════════════════
+                        if (user.AiTradingBudgetPercent > 0 && allocs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            var marketData = scope.ServiceProvider
+                                .GetRequiredService<Application.Common.Interfaces.Market.IMarketDataService>();
+
+                            var aiBudgetTotal = cashAvailable * user.AiTradingBudgetPercent / 100m;
+                            var aiInvested = await context.Positions
+                                .Where(p => p.UserId == userId && p.Status == PositionStatus.Open && p.IsActive && p.IsAiGenerated)
+                                .SumAsync(p => p.EntryPrice * p.Quantity, ct);
+                            var aiCashRemaining = aiBudgetTotal - aiInvested;
+
+                            var positionsCreated = 0;
+
+                            foreach (var allocEl in allocs.EnumerateArray())
+                            {
+                                if (aiCashRemaining <= 0) break;
+
+                                try
+                                {
+                                    // Parse allocation
+                                    var skip = allocEl.TryGetProperty("skip", out var skipProp) && skipProp.GetBoolean();
+                                    if (skip) continue;
+
+                                    var symbol = allocEl.TryGetProperty("symbol", out var symProp) ? symProp.GetString() ?? "" : "";
+                                    var directionStr = allocEl.TryGetProperty("direction", out var dirProp) ? dirProp.GetString() ?? "Long" : "Long";
+                                    var suggestedBudget = allocEl.TryGetProperty("suggestedBudget", out var budProp) ? budProp.GetDecimal() : 0;
+
+                                    if (string.IsNullOrEmpty(symbol) || suggestedBudget <= 0) continue;
+
+                                    // Cap allocation by remaining AI budget
+                                    var positionBudget = Math.Min(suggestedBudget, aiCashRemaining);
+                                    if (positionBudget < 10) continue;
+
+                                    // Check no existing open AI position for this symbol
+                                    var hasExisting = await context.Positions
+                                        .AnyAsync(p => p.UserId == userId && p.Symbol == symbol
+                                            && p.Status == PositionStatus.Open && p.IsActive && p.IsAiGenerated, ct);
+                                    if (hasExisting)
+                                    {
+                                        _logger.LogDebug("AI advisor: already has position for {Symbol} — skipping", symbol);
+                                        continue;
+                                    }
+
+                                    // Fetch current price
+                                    decimal entryPrice;
+                                    try
+                                    {
+                                        var candles = await marketData.GetCandlesAsync(symbol, 1, "1H");
+                                        if (candles.Count == 0) continue;
+                                        entryPrice = candles.Last().Close;
+                                    }
+                                    catch
+                                    {
+                                        _logger.LogDebug("AI advisor: failed to get price for {Symbol}", symbol);
+                                        continue;
+                                    }
+
+                                    if (entryPrice <= 0) continue;
+
+                                    // Determine asset class and calculate quantity
+                                    var isCrypto = symbol.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
+                                        && !symbol.Contains(".") && symbol.Length <= 10;
+                                    var quantity = isCrypto
+                                        ? Math.Round(positionBudget / entryPrice, 6)
+                                        : Math.Floor(positionBudget / entryPrice);
+                                    if (quantity <= 0) continue;
+
+                                    var direction = directionStr.Contains("Short", StringComparison.OrdinalIgnoreCase)
+                                        ? SignalType.Short : SignalType.Long;
+
+                                    var confidence = allocEl.TryGetProperty("confidence", out var confProp)
+                                        ? confProp.GetString() ?? "Medium" : "Medium";
+                                    var rationale = allocEl.TryGetProperty("rationale", out var ratProp)
+                                        ? ratProp.GetString() ?? "" : "";
+
+                                    var position = new Position
+                                    {
+                                        Symbol = symbol,
+                                        AssetClass = isCrypto ? AssetClass.Crypto : AssetClass.Stock,
+                                        SignalType = direction,
+                                        EntryPrice = entryPrice,
+                                        Quantity = quantity,
+                                        CurrentPrice = entryPrice,
+                                        Status = PositionStatus.Open,
+                                        IsAiGenerated = true,
+                                        Notes = $"AI Advisor allocation: {direction} {symbol} ${positionBudget:N0} ({confidence} confidence). {rationale}",
+                                        UserId = userId
+                                    };
+
+                                    context.Positions.Add(position);
+                                    aiCashRemaining -= quantity * entryPrice;
+                                    positionsCreated++;
+
+                                    _logger.LogInformation(
+                                        "🤖 AI Advisor executed: {Symbol} {Direction} {Qty} units @ ${Entry:N2} (budget: ${Budget:N0})",
+                                        symbol, direction, quantity, entryPrice, positionBudget);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to execute advisor allocation");
+                                }
+                            }
+
+                            if (positionsCreated > 0)
+                            {
+                                await context.SaveChangesAsync(ct);
+                                _logger.LogInformation("🤖 AI Advisor auto-executed {Count} positions for user {UserId}",
+                                    positionsCreated, userId);
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -686,7 +846,7 @@ public class BackgroundPatternScannerService : BackgroundService
                 : Math.Floor(positionBudget / entryPrice);
             if (quantity <= 0) return;
 
-            
+
 
             var position = new Position
             {

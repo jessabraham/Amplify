@@ -504,7 +504,7 @@ public class PatternScannerController : ControllerBase
         var patterns = await _context.DetectedPatterns
             .Where(p => p.UserId == userId)
             .OrderByDescending(p => p.CreatedAt)
-            .Take(200)
+            .Take(500)
             .ToListAsync();
 
         var result = patterns.Select(p => new PatternLifecycleDto

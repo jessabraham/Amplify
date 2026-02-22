@@ -22,42 +22,61 @@
         <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin-bottom: 24px;">
             <div class="stat-card" @onclick='() => SetFilter("Active")' style="cursor:pointer; @(GetFilterHighlight("Active"))">
                 <div class="stat-label">🟢 ACTIVE</div>
-                <div class="stat-value" style="color: var(--accent-green);">@_data.Active</div>
+                <div class="stat-value" style="color: var(--accent-green);">@SymbolFilteredPatterns.Count(p => p.Status == "Active")</div>
             </div>
             <div class="stat-card" @onclick='() => SetFilter("PlayingOut")' style="cursor:pointer; @(GetFilterHighlight("PlayingOut"))">
                 <div class="stat-label">🔵 PLAYING OUT</div>
-                <div class="stat-value" style="color: var(--accent-cyan);">@_data.PlayingOut</div>
+                <div class="stat-value" style="color: var(--accent-cyan);">@SymbolFilteredPatterns.Count(p => p.Status == "PlayingOut")</div>
             </div>
             <div class="stat-card" @onclick='() => SetFilter("HitTarget")' style="cursor:pointer; @(GetFilterHighlight("HitTarget"))">
                 <div class="stat-label">✅ HIT TARGET</div>
-                <div class="stat-value" style="color: var(--accent-green);">@_data.HitTarget</div>
+                <div class="stat-value" style="color: var(--accent-green);">@SymbolFilteredPatterns.Count(p => p.Status == "HitTarget")</div>
             </div>
             <div class="stat-card" @onclick='() => SetFilter("HitStop")' style="cursor:pointer; @(GetFilterHighlight("HitStop"))">
                 <div class="stat-label">❌ HIT STOP</div>
-                <div class="stat-value" style="color: var(--accent-red);">@_data.HitStop</div>
+                <div class="stat-value" style="color: var(--accent-red);">@SymbolFilteredPatterns.Count(p => p.Status == "HitStop")</div>
             </div>
             <div class="stat-card" @onclick='() => SetFilter("Expired")' style="cursor:pointer; @(GetFilterHighlight("Expired"))">
                 <div class="stat-label">⏰ EXPIRED</div>
-                <div class="stat-value" style="color: var(--text-muted);">@_data.Expired</div>
+                <div class="stat-value" style="color: var(--text-muted);">@SymbolFilteredPatterns.Count(p => p.Status == "Expired")</div>
             </div>
             <div class="stat-card" @onclick='() => SetFilter("Invalidated")' style="cursor:pointer; @(GetFilterHighlight("Invalidated"))">
                 <div class="stat-label">🚫 INVALIDATED</div>
-                <div class="stat-value" style="color: var(--text-muted);">@_data.Invalidated</div>
+                <div class="stat-value" style="color: var(--text-muted);">@SymbolFilteredPatterns.Count(p => p.Status == "Invalidated")</div>
             </div>
+            @{
+                var resolved = SymbolFilteredPatterns.Where(p => p.WasCorrect.HasValue).ToList();
+                var winRate = resolved.Any() ? Math.Round(resolved.Count(p => p.WasCorrect == true) * 100.0 / resolved.Count, 1) : 0;
+            }
             <div class="stat-card" @onclick='() => SetFilter(null)' style="cursor:pointer; @(GetFilterHighlight(null))">
                 <div class="stat-label">📊 WIN RATE</div>
-                <div class="stat-value" style="color: @(_data.WinRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">@_data.WinRate%</div>
+                <div class="stat-value" style="color: @(winRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">@winRate%</div>
             </div>
         </div>
 
-        <!-- Filter tabs -->
+        <!-- Symbol filter -->
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Symbol:</span>
+            <button class="filter-tab @(_symbolFilter == null ? "active" : "")" @onclick='() => SetSymbolFilter(null)'>
+                All
+            </button>
+            @foreach (var symbol in _data.Patterns.Select(p => p.Asset).Distinct().OrderBy(s => s))
+            {
+                var symCount = SymbolFilteredPatterns.Count(p => p.Asset == symbol);
+                <button class="filter-tab @(_symbolFilter == symbol ? "active" : "")" @onclick="() => SetSymbolFilter(symbol)">
+                    @symbol (@symCount)
+                </button>
+            }
+        </div>
+
+        <!-- Status filter tabs -->
         <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
             <button class="filter-tab @(_statusFilter == null ? "active" : "")" @onclick='() => SetFilter(null)'>
-                All (@_data.Patterns.Count)
+                All (@SymbolFilteredPatterns.Count)
             </button>
             @foreach (var status in new[] { "Active", "PlayingOut", "HitTarget", "HitStop", "Expired", "Invalidated" })
             {
-                var count = _data.Patterns.Count(p => p.Status == status);
+                var count = SymbolFilteredPatterns.Count(p => p.Status == status);
                 if (count > 0)
                 {
                     <button class="filter-tab @(_statusFilter == status ? "active" : "")" @onclick="() => SetFilter(status)">
@@ -460,9 +479,17 @@
     private bool _loading;
     private bool _loaded;
     private string? _statusFilter;
+    private string? _symbolFilter;
     private Guid? _expandedId;
 
+    /// <summary>Patterns filtered by symbol only (used for status tab counts)</summary>
+    private List<PatternHistoryDto> SymbolFilteredPatterns => _data?.Patterns
+        .Where(p => _symbolFilter == null || p.Asset == _symbolFilter)
+        .ToList() ?? new();
+
+    /// <summary>Patterns filtered by both symbol and status</summary>
     private List<PatternHistoryDto> FilteredPatterns => _data?.Patterns
+        .Where(p => _symbolFilter == null || p.Asset == _symbolFilter)
         .Where(p => _statusFilter == null || p.Status == _statusFilter)
         .ToList() ?? new();
 
@@ -496,6 +523,12 @@
     private void SetFilter(string? status)
     {
         _statusFilter = _statusFilter == status ? null : status;
+    }
+
+    private void SetSymbolFilter(string? symbol)
+    {
+        _symbolFilter = _symbolFilter == symbol ? null : symbol;
+        _statusFilter = null; // Reset status filter when changing symbol
     }
 
     private void ToggleExpand(Guid id)

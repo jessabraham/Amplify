@@ -358,6 +358,7 @@ public class PortfolioService : IPortfolioService
         ReturnPercent = p.ReturnPercent,
         Status = p.Status,
         Notes = p.Notes,
+        IsAiGenerated = p.IsAiGenerated,
         TradeSignalId = p.TradeSignalId,
         CreatedAt = p.CreatedAt
     };

@@ -451,6 +451,7 @@ public class TradeSimulationService
     public async Task<List<SimulatedTrade>> GetActiveTradesAsync(string userId)
     {
         return await _context.SimulatedTrades
+            .Include(t => t.TradeSignal)
             .Where(t => t.UserId == userId && t.Status == SimulationStatus.Active)
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync();
@@ -462,6 +463,7 @@ public class TradeSimulationService
     public async Task<List<SimulatedTrade>> GetTradeHistoryAsync(string userId, int count = 50)
     {
         return await _context.SimulatedTrades
+            .Include(t => t.TradeSignal)
             .Where(t => t.UserId == userId && t.Status == SimulationStatus.Resolved)
             .OrderByDescending(t => t.ResolvedAt)
             .Take(count)

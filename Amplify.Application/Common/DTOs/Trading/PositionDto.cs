@@ -27,6 +27,7 @@ public class PositionDto
 
     public PositionStatus Status { get; set; }
     public string? Notes { get; set; }
+    public bool IsAiGenerated { get; set; }
     public Guid? TradeSignalId { get; set; }
     public DateTime CreatedAt { get; set; }
 }
