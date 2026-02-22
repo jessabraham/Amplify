@@ -79,6 +79,14 @@ public class PortfolioAdvisorController : ControllerBase
                 .Select(s => new { s.Asset, s.SignalType, s.PatternName, s.PatternConfidence, s.AIConfidence, s.AIBias, s.SetupScore, s.Regime })
                 .ToListAsync();
 
+            // ── Get LIVE patterns only (Active or PlayingOut) ───────
+            var livePatterns = await _context.DetectedPatterns
+                .Where(p => p.UserId == UserId
+                    && (p.Status == Domain.Enumerations.PatternStatus.Active || p.Status == Domain.Enumerations.PatternStatus.PlayingOut)
+                    && watchlist.Select(w => w.Symbol).Contains(p.Asset))
+                .OrderByDescending(p => p.Confidence)
+                .ToListAsync();
+
             // ── Get recent regime data ──────────────────────────────
             var recentRegimes = await _context.RegimeHistory
                 .Where(r => watchlist.Select(w => w.Symbol).Contains(r.Symbol))
@@ -103,17 +111,19 @@ public class PortfolioAdvisorController : ControllerBase
             }
 
             prompt.AppendLine();
-            prompt.AppendLine("Evaluate each symbol and suggest a dollar allocation:");
+            prompt.AppendLine("Evaluate each symbol (only LIVE patterns — Active or PlayingOut):");
             foreach (var w in watchlist)
             {
                 var regime = recentRegimes.FirstOrDefault(r => r.Symbol == w.Symbol);
-                var signals = recentSignals.Where(s => s.Asset == w.Symbol).Take(1).ToList();
+                var symbolPatterns = livePatterns.Where(p => p.Asset == w.Symbol).ToList();
                 var hasPosition = openPositions.Any(p => p.Symbol == w.Symbol);
-                var top = signals.FirstOrDefault();
 
-                prompt.Append($"- {w.Symbol}: regime={regime?.Regime.ToString() ?? "Unknown"}, bias={w.LastBias ?? "N/A"}, patterns={w.LastPatternCount}");
-                if (top is not null)
-                    prompt.Append($", signal={top.PatternName}({top.SignalType}), confidence={top.AIConfidence ?? 0}%");
+                prompt.Append($"- {w.Symbol}: {symbolPatterns.Count} live patterns, regime={regime?.Regime.ToString() ?? "Unknown"}, bias={w.LastBias ?? "N/A"}");
+                if (symbolPatterns.Any())
+                {
+                    var best = symbolPatterns.First();
+                    prompt.Append($", best={best.PatternType}({best.Direction}), conf={best.Confidence:F0}%, status={best.Status}");
+                }
                 if (hasPosition)
                     prompt.Append(", HAS_POSITION");
                 prompt.AppendLine();

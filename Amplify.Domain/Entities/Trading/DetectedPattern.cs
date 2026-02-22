@@ -34,15 +34,66 @@ public class DetectedPattern : IEntity
     public string? AIAnalysis { get; set; }  // Ollama's take on the pattern
     public decimal? AIConfidence { get; set; } // AI's confidence score
 
-    // Outcome tracking (filled after trade resolves)
+    // ═══════════════════════════════════════════════════════════════
+    // LIFECYCLE — pattern validity and outcome tracking
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>Current lifecycle status of this pattern.</summary>
+    public PatternStatus Status { get; set; } = PatternStatus.Active;
+
+    /// <summary>When this pattern expires based on its timeframe.</summary>
+    public DateTime ExpiresAt { get; set; }
+
+    /// <summary>Current price at last lifecycle check.</summary>
+    public decimal? CurrentPrice { get; set; }
+
+    /// <summary>High water mark — furthest price moved in pattern direction since detection.</summary>
+    public decimal? HighWaterMark { get; set; }
+
+    /// <summary>Low water mark — furthest price moved against pattern direction since detection.</summary>
+    public decimal? LowWaterMark { get; set; }
+
+    /// <summary>When status changed to a terminal state (HitTarget/HitStop/Expired).</summary>
+    public DateTime? ResolvedAt { get; set; }
+
+    /// <summary>Price at resolution (target hit price, stop hit price, or last price at expiry).</summary>
+    public decimal? ResolutionPrice { get; set; }
+
+    // Legacy outcome tracking (kept for backward compat)
     public bool? WasCorrect { get; set; }
     public decimal? ActualPnLPercent { get; set; }
-    public DateTime? ResolvedAt { get; set; }
 
     // Was a signal auto-generated?
     public Guid? GeneratedSignalId { get; set; }
     public bool EmailSent { get; set; }
 
+    // Link to portfolio advice that referenced this pattern
+    public Guid? PortfolioAdviceId { get; set; }
+
     // User
     public string UserId { get; set; } = string.Empty;
+
+    // ═══════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>Is this pattern still valid for trading decisions?</summary>
+    public bool IsLive => Status == PatternStatus.Active || Status == PatternStatus.PlayingOut;
+
+    /// <summary>Has this pattern reached a terminal state?</summary>
+    public bool IsResolved => Status == PatternStatus.HitTarget || Status == PatternStatus.HitStop
+        || Status == PatternStatus.Expired || Status == PatternStatus.Invalidated;
+
+    /// <summary>Calculate expiry based on timeframe. Call at creation time.</summary>
+    public static DateTime CalculateExpiry(PatternTimeframe timeframe, DateTime detectedAt) => timeframe switch
+    {
+        PatternTimeframe.OneMinute => detectedAt.AddMinutes(30),
+        PatternTimeframe.FiveMinute => detectedAt.AddHours(2),
+        PatternTimeframe.FifteenMinute => detectedAt.AddHours(6),
+        PatternTimeframe.OneHour => detectedAt.AddHours(8),
+        PatternTimeframe.FourHour => detectedAt.AddDays(2),
+        PatternTimeframe.Daily => detectedAt.AddDays(5),
+        PatternTimeframe.Weekly => detectedAt.AddDays(14),
+        _ => detectedAt.AddDays(5)
+    };
 }

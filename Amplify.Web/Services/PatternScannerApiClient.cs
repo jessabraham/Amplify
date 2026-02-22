@@ -45,6 +45,14 @@ public class PatternScannerApiClient
         if (!response.IsSuccessStatusCode) return new();
         return await response.Content.ReadFromJsonAsync<List<PatternHistoryDto>>() ?? new();
     }
+
+    public async Task<PatternLifecycleResponse?> GetLifecycleAsync()
+    {
+        AttachToken();
+        var response = await _http.GetAsync("api/PatternScanner/lifecycle");
+        if (!response.IsSuccessStatusCode) return null;
+        return await response.Content.ReadFromJsonAsync<PatternLifecycleResponse>();
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -190,6 +198,7 @@ public class PatternHistoryDto
     public string Asset { get; set; } = "";
     public string PatternType { get; set; } = "";
     public string Direction { get; set; } = "";
+    public string Timeframe { get; set; } = "";
     public decimal Confidence { get; set; }
     public decimal HistoricalWinRate { get; set; }
     public string Description { get; set; } = "";
@@ -197,7 +206,28 @@ public class PatternHistoryDto
     public decimal SuggestedEntry { get; set; }
     public decimal SuggestedStop { get; set; }
     public decimal SuggestedTarget { get; set; }
+    public decimal? CurrentPrice { get; set; }
+    public decimal? HighWaterMark { get; set; }
+    public decimal? LowWaterMark { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public decimal? ResolutionPrice { get; set; }
     public bool? WasCorrect { get; set; }
     public decimal? ActualPnLPercent { get; set; }
+    public string? AIAnalysis { get; set; }
+    public decimal? AIConfidence { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public class PatternLifecycleResponse
+{
+    public int Active { get; set; }
+    public int PlayingOut { get; set; }
+    public int HitTarget { get; set; }
+    public int HitStop { get; set; }
+    public int Expired { get; set; }
+    public int Invalidated { get; set; }
+    public double WinRate { get; set; }
+    public List<PatternHistoryDto> Patterns { get; set; } = new();
 }

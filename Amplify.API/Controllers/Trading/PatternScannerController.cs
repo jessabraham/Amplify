@@ -466,25 +466,88 @@ public class PatternScannerController : ControllerBase
             query = query.Where(p => p.Asset == symbol.ToUpper());
 
         var results = await query.Take(100).ToListAsync();
-        return Ok(results.Select(p => new
+        return Ok(results.Select(p => new PatternLifecycleDto
         {
-            p.Id,
-            p.Asset,
+            Id = p.Id,
+            Asset = p.Asset,
             PatternType = p.PatternType.ToString(),
             Direction = p.Direction.ToString(),
-            p.Confidence,
-            p.HistoricalWinRate,
-            p.Description,
-            p.DetectedAtPrice,
-            p.SuggestedEntry,
-            p.SuggestedStop,
-            p.SuggestedTarget,
-            p.AIAnalysis,
-            p.AIConfidence,
-            p.WasCorrect,
-            p.ActualPnLPercent,
-            p.CreatedAt
+            Timeframe = p.Timeframe.ToString(),
+            Confidence = p.Confidence,
+            DetectedAtPrice = p.DetectedAtPrice,
+            SuggestedEntry = p.SuggestedEntry,
+            SuggestedStop = p.SuggestedStop,
+            SuggestedTarget = p.SuggestedTarget,
+            CurrentPrice = p.CurrentPrice,
+            HighWaterMark = p.HighWaterMark,
+            LowWaterMark = p.LowWaterMark,
+            Status = p.Status.ToString(),
+            CreatedAt = p.CreatedAt,
+            ExpiresAt = p.ExpiresAt,
+            ResolvedAt = p.ResolvedAt,
+            ResolutionPrice = p.ResolutionPrice,
+            WasCorrect = p.WasCorrect,
+            ActualPnLPercent = p.ActualPnLPercent,
+            AIAnalysis = p.AIAnalysis,
+            AIConfidence = p.AIConfidence
         }));
+    }
+
+    /// <summary>
+    /// Get all patterns grouped by lifecycle status for the Pattern Lifecycle dashboard.
+    /// </summary>
+    [HttpGet("lifecycle")]
+    public async Task<IActionResult> GetLifecycle()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+
+        var patterns = await _context.DetectedPatterns
+            .Where(p => p.UserId == userId)
+            .OrderByDescending(p => p.CreatedAt)
+            .Take(200)
+            .ToListAsync();
+
+        var result = patterns.Select(p => new PatternLifecycleDto
+        {
+            Id = p.Id,
+            Asset = p.Asset,
+            PatternType = p.PatternType.ToString(),
+            Direction = p.Direction.ToString(),
+            Timeframe = p.Timeframe.ToString(),
+            Confidence = p.Confidence,
+            DetectedAtPrice = p.DetectedAtPrice,
+            SuggestedEntry = p.SuggestedEntry,
+            SuggestedStop = p.SuggestedStop,
+            SuggestedTarget = p.SuggestedTarget,
+            CurrentPrice = p.CurrentPrice,
+            HighWaterMark = p.HighWaterMark,
+            LowWaterMark = p.LowWaterMark,
+            Status = p.Status.ToString(),
+            CreatedAt = p.CreatedAt,
+            ExpiresAt = p.ExpiresAt,
+            ResolvedAt = p.ResolvedAt,
+            ResolutionPrice = p.ResolutionPrice,
+            WasCorrect = p.WasCorrect,
+            ActualPnLPercent = p.ActualPnLPercent,
+            AIAnalysis = p.AIAnalysis,
+            AIConfidence = p.AIConfidence
+        }).ToList();
+
+        var summary = new
+        {
+            Active = result.Count(p => p.Status == "Active"),
+            PlayingOut = result.Count(p => p.Status == "PlayingOut"),
+            HitTarget = result.Count(p => p.Status == "HitTarget"),
+            HitStop = result.Count(p => p.Status == "HitStop"),
+            Expired = result.Count(p => p.Status == "Expired"),
+            Invalidated = result.Count(p => p.Status == "Invalidated"),
+            WinRate = result.Count(p => p.WasCorrect == true) > 0
+                ? Math.Round(result.Count(p => p.WasCorrect == true) * 100.0 / result.Count(p => p.WasCorrect.HasValue), 1)
+                : 0,
+            Patterns = result
+        };
+
+        return Ok(summary);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -986,4 +1049,34 @@ public class AIAnalysisDto
     public decimal? RecommendedStop { get; set; }
     public decimal? RecommendedTarget { get; set; }
     public string RiskReward { get; set; } = "";
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PATTERN LIFECYCLE ENDPOINT
+// ═══════════════════════════════════════════════════════════════
+
+public class PatternLifecycleDto
+{
+    public Guid Id { get; set; }
+    public string Asset { get; set; } = "";
+    public string PatternType { get; set; } = "";
+    public string Direction { get; set; } = "";
+    public string Timeframe { get; set; } = "";
+    public decimal Confidence { get; set; }
+    public decimal DetectedAtPrice { get; set; }
+    public decimal SuggestedEntry { get; set; }
+    public decimal SuggestedStop { get; set; }
+    public decimal SuggestedTarget { get; set; }
+    public decimal? CurrentPrice { get; set; }
+    public decimal? HighWaterMark { get; set; }
+    public decimal? LowWaterMark { get; set; }
+    public string Status { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public decimal? ResolutionPrice { get; set; }
+    public bool? WasCorrect { get; set; }
+    public decimal? ActualPnLPercent { get; set; }
+    public string? AIAnalysis { get; set; }
+    public decimal? AIConfidence { get; set; }
 }

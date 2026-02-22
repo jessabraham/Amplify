@@ -67,13 +67,36 @@ public class BackgroundPatternScannerService : BackgroundService
         await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
 
         var tickSeconds = _config.GetValue("BackgroundScanner:TickIntervalSeconds", 60);
+        var _lifecycleTick = 0;
+        var _advisorTick = 0;
+        var lifecycleInterval = 5;  // every 5 ticks (5 min at 60s tick)
+        var advisorIntervalHours = _config.GetValue("BackgroundScanner:AdvisorIntervalHours", 6);
+        var advisorInterval = advisorIntervalHours * 60; // convert to ticks (at 60s tick)
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                // Every tick: refresh prices + scan patterns
                 await RefreshPositionPricesAsync(stoppingToken);
                 await ScanDueItemsAsync(stoppingToken);
+
+                _lifecycleTick++;
+                _advisorTick++;
+
+                // Every 5 minutes: update pattern lifecycle
+                if (_lifecycleTick >= lifecycleInterval)
+                {
+                    _lifecycleTick = 0;
+                    await UpdatePatternLifecyclesAsync(stoppingToken);
+                }
+
+                // Every N hours: auto-run portfolio advisor
+                if (_advisorTick >= advisorInterval)
+                {
+                    _advisorTick = 0;
+                    await AutoRunPortfolioAdvisorAsync(stoppingToken);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -198,9 +221,26 @@ public class BackgroundPatternScannerService : BackgroundService
         item.LastBias = aiSynthesis?.OverallBias;
         item.UpdatedAt = DateTime.UtcNow;
 
-        // Save patterns to DB
+        // Save patterns to DB (with dedup — skip if same pattern+symbol+timeframe already active)
+        var existingActive = await context.DetectedPatterns
+            .Where(dp => dp.Asset == item.Symbol
+                && dp.UserId == item.UserId
+                && (dp.Status == PatternStatus.Active || dp.Status == PatternStatus.PlayingOut))
+            .Select(dp => new { dp.PatternType, dp.Timeframe })
+            .ToListAsync();
+
+        var existingSet = new HashSet<string>(
+            existingActive.Select(e => $"{e.PatternType}|{e.Timeframe}"));
+
+        var newPatternsAdded = 0;
         foreach (var p in patterns)
         {
+            var key = $"{p.PatternType}|{PatternTimeframe.Daily}";
+            if (existingSet.Contains(key))
+                continue; // Skip — already have an active pattern of this type
+
+            existingSet.Add(key); // Prevent duplicates within this batch too
+
             var verdict = aiSynthesis?.PatternVerdicts.FirstOrDefault(v =>
                 v.PatternName.Equals(p.PatternName, StringComparison.OrdinalIgnoreCase));
 
@@ -221,8 +261,18 @@ public class BackgroundPatternScannerService : BackgroundService
                 PatternEndDate = p.EndDate,
                 AIAnalysis = verdict is not null ? $"[{verdict.Grade}] {verdict.OneLineReason}" : null,
                 AIConfidence = aiSynthesis?.OverallConfidence,
+                Status = PatternStatus.Active,
+                ExpiresAt = DetectedPattern.CalculateExpiry(PatternTimeframe.Daily, DateTime.UtcNow),
+                CurrentPrice = candles.Last().Close,
                 UserId = item.UserId
             });
+            newPatternsAdded++;
+        }
+
+        if (newPatternsAdded < patterns.Count)
+        {
+            _logger.LogDebug("📋 {Symbol}: {New}/{Total} patterns added ({Skipped} duplicates skipped)",
+                item.Symbol, newPatternsAdded, patterns.Count, patterns.Count - newPatternsAdded);
         }
 
         // Build notification
@@ -398,6 +448,162 @@ public class BackgroundPatternScannerService : BackgroundService
         {
             await context.SaveChangesAsync(ct);
             _logger.LogInformation("Refreshed prices for {Count} open positions", updated);
+        }
+    }
+
+    /// <summary>
+    /// Update lifecycle of all live patterns — check prices, transition statuses, expire old ones.
+    /// Runs every ~5 minutes.
+    /// </summary>
+    private async Task UpdatePatternLifecyclesAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var lifecycle = scope.ServiceProvider.GetRequiredService<PatternLifecycleService>();
+
+            // Backfill expiry dates for patterns that predate the lifecycle system
+            await lifecycle.BackfillExpiriesAsync(ct);
+
+            // Update all live patterns
+            await lifecycle.UpdateAllLivePatternsAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error updating pattern lifecycles");
+        }
+    }
+
+    /// <summary>
+    /// Auto-run the Portfolio Advisor for all users with watchlist items.
+    /// Saves advice history so it's ready when users open the app.
+    /// Runs every N hours (default 6).
+    /// </summary>
+    private async Task AutoRunPortfolioAdvisorAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var advisor = scope.ServiceProvider.GetRequiredService<IAIAdvisor>();
+            var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+            // Find users that have active watchlist items
+            var userIds = await context.Set<WatchlistItem>()
+                .Where(w => w.IsActive)
+                .Select(w => w.UserId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            foreach (var userId in userIds)
+            {
+                try
+                {
+                    var user = await context.Users
+                        .OfType<Domain.Entities.Identity.ApplicationUser>()
+                        .FirstOrDefaultAsync(u => u.Id == userId, ct);
+                    if (user is null) continue;
+
+                    var watchlist = await context.Set<WatchlistItem>()
+                        .Where(w => w.UserId == userId && w.IsActive)
+                        .ToListAsync(ct);
+                    if (!watchlist.Any()) continue;
+
+                    var openPositions = await context.Positions
+                        .Where(p => p.UserId == userId && p.Status == PositionStatus.Open && p.IsActive)
+                        .ToListAsync(ct);
+
+                    var totalInvested = openPositions.Sum(p => p.EntryPrice * p.Quantity);
+                    var realizedPnL = 0m;
+                    try
+                    {
+                        realizedPnL = await context.SimulatedTrades
+                            .Where(t => t.UserId == userId && t.Status == SimulationStatus.Resolved)
+                            .SumAsync(t => t.PnLDollars ?? 0, ct);
+                    }
+                    catch { }
+                    var cashAvailable = user.StartingCapital + realizedPnL - totalInvested;
+
+                    // Only reference LIVE patterns (Active or PlayingOut)
+                    var livePatterns = await context.DetectedPatterns
+                        .Where(p => p.UserId == userId
+                            && (p.Status == PatternStatus.Active || p.Status == PatternStatus.PlayingOut)
+                            && watchlist.Select(w => w.Symbol).Contains(p.Asset))
+                        .OrderByDescending(p => p.Confidence)
+                        .Take(20)
+                        .ToListAsync(ct);
+
+                    // Build concise prompt
+                    var prompt = new System.Text.StringBuilder();
+                    prompt.AppendLine("Respond with ONLY valid JSON. No markdown, no text outside JSON.");
+                    prompt.AppendLine($"Cash: ${cashAvailable:N0}. Max per position: 25%. Open positions: {openPositions.Count}.");
+
+                    if (openPositions.Any())
+                    {
+                        prompt.Append("Current: ");
+                        prompt.AppendLine(string.Join(", ", openPositions.Select(p => $"{p.Symbol}(${p.EntryPrice * p.Quantity:N0})")));
+                    }
+
+                    prompt.AppendLine("Evaluate (only LIVE patterns):");
+                    foreach (var w in watchlist)
+                    {
+                        var patterns = livePatterns.Where(p => p.Asset == w.Symbol).ToList();
+                        var hasPos = openPositions.Any(p => p.Symbol == w.Symbol);
+                        prompt.Append($"- {w.Symbol}: {patterns.Count} live patterns");
+                        if (patterns.Any())
+                        {
+                            var best = patterns.First();
+                            prompt.Append($", best={best.PatternType}({best.Direction}), confidence={best.Confidence:F0}%, status={best.Status}");
+                        }
+                        prompt.Append($", bias={w.LastBias ?? "N/A"}");
+                        if (hasPos) prompt.Append(", HAS_POSITION");
+                        prompt.AppendLine();
+                    }
+
+                    prompt.AppendLine(@"JSON: {""summary"":""1 sentence"",""totalSuggestedAllocation"":0,""cashRetained"":0,""allocations"":[{""symbol"":""X"",""suggestedBudget"":0,""direction"":""Long"",""confidence"":""High"",""rationale"":""why"",""riskNote"":""risk"",""portfolioPercent"":0,""skip"":false,""skipReason"":null}],""warnings"":[],""diversificationScore"":""Good""}");
+
+                    var response = await advisor.GetAdvisoryAsync(prompt.ToString());
+
+                    // Parse and save
+                    var jsonStart = response.IndexOf('{');
+                    var jsonEnd = response.LastIndexOf('}');
+                    if (jsonStart >= 0 && jsonEnd > jsonStart)
+                    {
+                        var json = response[jsonStart..(jsonEnd + 1)];
+                        using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+
+                        var advice = new Domain.Entities.AI.PortfolioAdvice
+                        {
+                            CashAvailable = cashAvailable,
+                            TotalInvested = totalInvested,
+                            OpenPositionCount = openPositions.Count,
+                            WatchlistCount = watchlist.Count,
+                            Summary = root.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "",
+                            DiversificationScore = root.TryGetProperty("diversificationScore", out var d) ? d.GetString() ?? "" : "",
+                            TotalSuggestedAllocation = root.TryGetProperty("totalSuggestedAllocation", out var ta) ? ta.GetDecimal() : 0,
+                            CashRetained = root.TryGetProperty("cashRetained", out var cr) ? cr.GetDecimal() : 0,
+                            ResponseJson = json,
+                            TotalAllocations = root.TryGetProperty("allocations", out var allocs) ? allocs.GetArrayLength() : 0,
+                            UserId = userId
+                        };
+
+                        context.PortfolioAdvices.Add(advice);
+                        await context.SaveChangesAsync(ct);
+
+                        _logger.LogInformation("🧠 Auto-ran Portfolio Advisor for user {UserId}: {Allocations} allocations, ${Total:N0} suggested",
+                            userId, advice.TotalAllocations, advice.TotalSuggestedAllocation);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to auto-run Portfolio Advisor for user {UserId}", userId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error in auto Portfolio Advisor run");
         }
     }
 

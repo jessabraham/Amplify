@@ -50,6 +50,9 @@ public static class DependencyInjection
 
         services.AddHttpClient<IPatternAnalyzer, OllamaPatternAnalyzer>();
 
+        // Pattern lifecycle
+        services.AddScoped<Amplify.Infrastructure.Services.PatternLifecycleService>();
+
         // Simulation engine
         services.AddScoped<TradeSimulationService>();
         services.AddHostedService<SimulationResolverService>();
