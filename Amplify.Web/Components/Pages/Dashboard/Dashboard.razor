@@ -144,6 +144,45 @@
             </div>
         }
 
+        <!-- AI Trading Overview -->
+        @if (_data.AiOpenCount > 0 || _data.AiClosedCount > 0 || _data.ActivePatternCount > 0)
+        {
+            <div class="card" style="margin-bottom: 20px; border-left: 3px solid var(--accent-purple);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="ph-duotone ph-robot" style="font-size: 1.1rem; color: var(--accent-purple);"></i>
+                        <span style="font-weight: 700; color: var(--text-heading);">AI Trading</span>
+                        <span style="font-size: 0.6rem; background: rgba(99,102,241,0.15); color: var(--accent-purple); padding: 2px 8px; border-radius: 10px;">@(_data.AiOpenCount + _data.AiClosedCount) positions</span>
+                    </div>
+                    <a href="/portfolio-advisor" style="font-size: 0.75rem; color: var(--accent-purple); text-decoration: none;">
+                        Advisor <i class="ph ph-arrow-right" style="margin-left: 3px;"></i>
+                    </a>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">AI Open</div>
+                        <div class="pattern-level-value" style="color: var(--accent-purple);">@_data.AiOpenCount</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">AI Unrealized</div>
+                        <div class="pattern-level-value" style="color: @(_data.AiOpenPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@((_data.AiOpenPnL >= 0 ? "+" : "") + _data.AiOpenPnL.ToString("C0"))</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">AI Realized</div>
+                        <div class="pattern-level-value" style="color: @(_data.AiClosedPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@((_data.AiClosedPnL >= 0 ? "+" : "") + _data.AiClosedPnL.ToString("C0"))</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Manual P&amp;L</div>
+                        <div class="pattern-level-value" style="color: @((_data.ManualOpenPnL + _data.ManualClosedPnL) >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@(((_data.ManualOpenPnL + _data.ManualClosedPnL) >= 0 ? "+" : "") + (_data.ManualOpenPnL + _data.ManualClosedPnL).ToString("C0"))</div>
+                    </div>
+                    <div class="pattern-level">
+                        <div class="pattern-level-label">Active Patterns</div>
+                        <div class="pattern-level-value" style="color: var(--accent-cyan);">@_data.ActivePatternCount</div>
+                    </div>
+                </div>
+            </div>
+        }
+
         <!-- Main Grid: Positions + Activity -->
         <div style="display: grid; grid-template-columns: 3fr 2fr; gap: 20px; margin-bottom: 20px;">
 
@@ -239,10 +278,10 @@
                         {
                             var regimeColor = r.Regime.ToLower() switch
                             {
-                                                "trending" => "var(--accent-blue)",
-                                                "choppy" => "var(--accent-amber)",
-                                                "volexpansion" => "var(--accent-red)",
-                                                "meanreversion" => "var(--accent-purple)",
+                                                                "trending" => "var(--accent-blue)",
+                                                                "choppy" => "var(--accent-amber)",
+                                                                "volexpansion" => "var(--accent-red)",
+                                                                "meanreversion" => "var(--accent-purple)",
                                 _ => "var(--text-muted)"
                             };
                             var regimeConfStr = r.Confidence.ToString("F0") + "%";

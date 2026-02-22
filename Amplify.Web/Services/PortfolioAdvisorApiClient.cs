@@ -58,6 +58,16 @@ public class PortfolioAdvisorApiClient
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         return await response.Content.ReadFromJsonAsync<List<AdviceHistoryItem>>(options) ?? new();
     }
+
+    public async Task<AdvisorScorecard?> GetScorecardAsync()
+    {
+        AttachToken();
+        var response = await _http.GetAsync("api/PortfolioAdvisor/scorecard");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        return await response.Content.ReadFromJsonAsync<AdvisorScorecard>(options);
+    }
 }
 
 public class PortfolioAllocationResult
@@ -81,6 +91,8 @@ public class AllocationSuggestion
     public decimal PortfolioPercent { get; set; }
     public bool Skip { get; set; }
     public string? SkipReason { get; set; }
+    public List<string> PatternIds { get; set; } = new();
+    public string? PatternSummary { get; set; }
 }
 
 public class AdviceHistoryItem
@@ -98,4 +110,28 @@ public class AdviceHistoryItem
     public int TotalAllocations { get; set; }
     public int AllocationsFollowed { get; set; }
     public string ResponseJson { get; set; } = "";
+}
+
+public class AdvisorScorecard
+{
+    public int AdviceCount { get; set; }
+    public int TotalAllocations { get; set; }
+    public int TotalExecuted { get; set; }
+    public int TotalProfitable { get; set; }
+    public decimal ExecutionRate { get; set; }
+    public decimal WinRate { get; set; }
+    public decimal TotalPnL { get; set; }
+    public int AiExecuted { get; set; }
+    public int ManualExecuted { get; set; }
+    public List<ConfidenceBreakdown> ByConfidence { get; set; } = new();
+}
+
+public class ConfidenceBreakdown
+{
+    public string Confidence { get; set; } = "";
+    public int Total { get; set; }
+    public int Executed { get; set; }
+    public int Profitable { get; set; }
+    public decimal WinRate { get; set; }
+    public decimal TotalPnL { get; set; }
 }

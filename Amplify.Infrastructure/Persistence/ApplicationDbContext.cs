@@ -33,6 +33,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
     public DbSet<SimulatedTrade> SimulatedTrades => Set<SimulatedTrade>();
     public DbSet<PatternPerformance> PatternPerformances => Set<PatternPerformance>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

@@ -147,13 +147,25 @@ public class BackgroundPatternScannerService : BackgroundService
 
         if (dueItems.Count == 0) return;
 
+        // Filter out symbols whose markets are currently closed
+        var openItems = dueItems.Where(w => IsMarketOpen(w.Symbol)).ToList();
+        var skippedCount = dueItems.Count - openItems.Count;
+
+        if (openItems.Count == 0)
+        {
+            if (skippedCount > 0)
+                _logger.LogDebug("⏸ All {Count} due items skipped — markets closed.", skippedCount);
+            return;
+        }
+
         _logger.LogInformation(
-            "Scanning {Count} watchlist items (max {Max}/tick, AI {AIStatus}).",
-            dueItems.Count, maxPerTick, aiPaused ? "PAUSED" : "active");
+            "Scanning {Count} watchlist items (max {Max}/tick, AI {AIStatus}{Skipped}).",
+            openItems.Count, maxPerTick, aiPaused ? "PAUSED" : "active",
+            skippedCount > 0 ? $", {skippedCount} skipped (market closed)" : "");
 
         var delayBetweenMs = _config.GetValue("BackgroundScanner:DelayBetweenAICallsMs", 3000);
 
-        foreach (var item in dueItems)
+        foreach (var item in openItems)
         {
             if (ct.IsCancellationRequested) break;
 
@@ -259,23 +271,43 @@ public class BackgroundPatternScannerService : BackgroundService
         item.LastBias = aiSynthesis?.OverallBias;
         item.UpdatedAt = DateTime.UtcNow;
 
-        // Save patterns to DB (with dedup — skip if same pattern+symbol+timeframe already active)
-        var existingActive = await context.DetectedPatterns
+        // Save patterns to DB (with dedup — skip if same pattern+symbol+timeframe+direction is active or was detected recently)
+        // Cooldown scales with timeframe: shorter timeframes allow faster re-detection for day traders
+        var now = DateTime.UtcNow;
+        var existingPatterns = await context.DetectedPatterns
             .Where(dp => dp.Asset == item.Symbol
                 && dp.UserId == item.UserId
-                && (dp.Status == PatternStatus.Active || dp.Status == PatternStatus.PlayingOut))
-            .Select(dp => new { dp.PatternType, dp.Timeframe })
+                && dp.CreatedAt >= now.AddHours(-72)) // Fetch last 72h worth, filter per-pattern below
+            .Select(dp => new { dp.PatternType, dp.Timeframe, dp.Direction, dp.Status, dp.CreatedAt })
             .ToListAsync();
 
-        var existingSet = new HashSet<string>(
-            existingActive.Select(e => $"{e.PatternType}|{e.Timeframe}"));
+        // Build dedup set: active/playing patterns always block, resolved patterns block within cooldown
+        var existingSet = new HashSet<string>();
+        foreach (var e in existingPatterns)
+        {
+            var isStillLive = e.Status == PatternStatus.Active || e.Status == PatternStatus.PlayingOut;
+            var cooldownHours = e.Timeframe switch
+            {
+                PatternTimeframe.OneHour => 2,    // 1H: 2-hour cooldown (day trading friendly)
+                PatternTimeframe.FourHour => 6,   // 4H: 6-hour cooldown
+                PatternTimeframe.Daily => 24,     // Daily: 24-hour cooldown
+                PatternTimeframe.Weekly => 72,    // Weekly: 3-day cooldown
+                _ => 6
+            };
+            var withinCooldown = e.CreatedAt >= now.AddHours(-cooldownHours);
+
+            if (isStillLive || withinCooldown)
+            {
+                existingSet.Add($"{e.PatternType}|{e.Timeframe}|{e.Direction}");
+            }
+        }
 
         var newPatternsAdded = 0;
         foreach (var (p, ptf, lastClose) in allPatterns)
         {
-            var key = $"{p.PatternType}|{ptf}";
+            var key = $"{p.PatternType}|{ptf}|{p.Direction}";
             if (existingSet.Contains(key))
-                continue; // Skip — already have an active pattern of this type+timeframe
+                continue; // Skip — already have an active/recent pattern of this type+timeframe+direction
 
             existingSet.Add(key); // Prevent duplicates within this batch too
 
@@ -311,6 +343,19 @@ public class BackgroundPatternScannerService : BackgroundService
         {
             _logger.LogDebug("📋 {Symbol}: {New}/{Total} patterns added ({Skipped} duplicates skipped)",
                 item.Symbol, newPatternsAdded, allPatterns.Count, allPatterns.Count - newPatternsAdded);
+        }
+
+        // Notify on new high-confidence patterns
+        if (newPatternsAdded > 0)
+        {
+            var bestNew = allPatterns.OrderByDescending(a => a.Pattern.Confidence).Select(a => a.Pattern).FirstOrDefault();
+            if (bestNew is not null && bestNew.Confidence >= 75)
+            {
+                await NotifyAsync(context, item.UserId, NotificationType.PatternDetected,
+                    $"New pattern: {bestNew.PatternName} on {item.Symbol}",
+                    $"{bestNew.Direction} {bestNew.PatternName} ({bestNew.Confidence:F0}% confidence)",
+                    NotificationPriority.Normal, "/pattern-lifecycle", ct: ct);
+            }
         }
 
         // Build notification
@@ -450,8 +495,17 @@ public class BackgroundPatternScannerService : BackgroundService
 
         if (!openPositions.Any()) return;
 
-        // Group by symbol to avoid duplicate API calls
-        var symbols = openPositions.Select(p => p.Symbol).Distinct().ToList();
+        // Group by symbol to avoid duplicate API calls — skip closed markets
+        var symbols = openPositions.Select(p => p.Symbol).Distinct()
+            .Where(s => IsMarketOpen(s)) // Only refresh prices when market is open
+            .ToList();
+
+        if (!symbols.Any())
+        {
+            _logger.LogDebug("⏸ Price refresh skipped — all position markets closed.");
+            return;
+        }
+
         var priceCache = new Dictionary<string, decimal>();
 
         foreach (var symbol in symbols)
@@ -473,8 +527,9 @@ public class BackgroundPatternScannerService : BackgroundService
             }
         }
 
-        // Update all positions with fresh prices
+        // Update all positions with fresh prices + auto-close AI positions at stop/target
         var updated = 0;
+        var closed = 0;
         foreach (var position in openPositions)
         {
             if (priceCache.TryGetValue(position.Symbol, out var latestPrice) && latestPrice > 0)
@@ -486,13 +541,56 @@ public class BackgroundPatternScannerService : BackgroundService
                 position.UnrealizedPnL = direction * (latestPrice - position.EntryPrice) * position.Quantity;
 
                 updated++;
+
+                // Auto-close AI positions that hit stop or target
+                if (position.IsAiGenerated && position.StopLoss > 0 && position.Target1 > 0)
+                {
+                    var isLong = position.SignalType == Domain.Enumerations.SignalType.Long;
+                    var hitStop = isLong
+                        ? latestPrice <= position.StopLoss
+                        : latestPrice >= position.StopLoss;
+                    var hitTarget = isLong
+                        ? latestPrice >= position.Target1
+                        : latestPrice <= position.Target1;
+
+                    if (hitStop || hitTarget)
+                    {
+                        position.Status = PositionStatus.Closed;
+                        position.IsActive = false;
+                        position.ExitPrice = latestPrice;
+                        position.ExitDateUtc = DateTime.UtcNow;
+                        position.DeactivatedAt = DateTime.UtcNow;
+                        position.RealizedPnL = direction * (latestPrice - position.EntryPrice) * position.Quantity;
+                        position.UnrealizedPnL = 0;
+                        position.ReturnPercent = position.EntryPrice > 0
+                            ? (direction * (latestPrice - position.EntryPrice) / position.EntryPrice) * 100m
+                            : 0;
+                        position.Notes += $" | Auto-closed: {(hitTarget ? "Hit Target" : "Hit Stop")} @ {latestPrice:C2}";
+
+                        closed++;
+                        _logger.LogInformation(
+                            "🤖 AI auto-closed {Symbol} {Direction}: {Outcome} @ {Price:C2} (P&L: {PnL:C2}, {Return:F1}%)",
+                            position.Symbol, position.SignalType,
+                            hitTarget ? "HitTarget" : "HitStop",
+                            latestPrice, position.RealizedPnL, position.ReturnPercent);
+
+                        // Notify
+                        var notifType = hitTarget ? NotificationType.PositionAutoClosedTarget : NotificationType.PositionAutoClosedStop;
+                        var notifPriority = hitTarget ? NotificationPriority.Normal : NotificationPriority.High;
+                        await NotifyAsync(context, position.UserId, notifType,
+                            $"{position.Symbol} auto-closed: {(hitTarget ? "Hit Target" : "Hit Stop")}",
+                            $"{position.SignalType} position closed @ {latestPrice:C2}. P&L: {position.RealizedPnL:C2} ({position.ReturnPercent:F1}%)",
+                            notifPriority, "/portfolio", position.Id.ToString(), ct);
+                    }
+                }
             }
         }
 
         if (updated > 0)
         {
             await context.SaveChangesAsync(ct);
-            _logger.LogInformation("Refreshed prices for {Count} open positions", updated);
+            _logger.LogInformation("Refreshed prices for {Count} open positions{Closed}",
+                updated, closed > 0 ? $", auto-closed {closed} AI positions" : "");
         }
     }
 
@@ -597,15 +695,20 @@ public class BackgroundPatternScannerService : BackgroundService
                         prompt.Append($"- {w.Symbol}: {patterns.Count} live patterns");
                         if (patterns.Any())
                         {
-                            var best = patterns.First();
-                            prompt.Append($", best={best.PatternType}({best.Direction}), confidence={best.Confidence:F0}%, status={best.Status}");
+                            foreach (var pat in patterns.Take(5))
+                            {
+                                prompt.Append($"\n  [{pat.Id.ToString()[..8]}] {pat.PatternType}({pat.Direction}) {pat.Timeframe} conf={pat.Confidence:F0}% status={pat.Status}");
+                                if (pat.SuggestedEntry > 0) prompt.Append($" entry=${pat.SuggestedEntry:F2}");
+                                if (pat.SuggestedTarget > 0) prompt.Append($" tgt=${pat.SuggestedTarget:F2}");
+                                if (pat.SuggestedStop > 0) prompt.Append($" stop=${pat.SuggestedStop:F2}");
+                            }
                         }
-                        prompt.Append($", bias={w.LastBias ?? "N/A"}");
+                        prompt.Append($"\n  bias={w.LastBias ?? "N/A"}");
                         if (hasPos) prompt.Append(", HAS_POSITION");
                         prompt.AppendLine();
                     }
 
-                    prompt.AppendLine(@"JSON: {""summary"":""1 sentence"",""totalSuggestedAllocation"":0,""cashRetained"":0,""allocations"":[{""symbol"":""X"",""suggestedBudget"":0,""direction"":""Long"",""confidence"":""High"",""rationale"":""why"",""riskNote"":""risk"",""portfolioPercent"":0,""skip"":false,""skipReason"":null}],""warnings"":[],""diversificationScore"":""Good""}");
+                    prompt.AppendLine(@"JSON: {""summary"":""1 sentence"",""totalSuggestedAllocation"":0,""cashRetained"":0,""allocations"":[{""symbol"":""X"",""suggestedBudget"":0,""direction"":""Long"",""confidence"":""High"",""rationale"":""why"",""riskNote"":""risk"",""portfolioPercent"":0,""skip"":false,""skipReason"":null,""patternIds"":[""id1""],""patternSummary"":""BullishEngulfing Daily 82%""}],""warnings"":[],""diversificationScore"":""Good""}");
 
                     var response = await advisor.GetAdvisoryAsync(prompt.ToString());
 
@@ -638,6 +741,12 @@ public class BackgroundPatternScannerService : BackgroundService
 
                         _logger.LogInformation("🧠 Auto-ran Portfolio Advisor for user {UserId}: {Allocations} allocations, ${Total:N0} suggested",
                             userId, advice.TotalAllocations, advice.TotalSuggestedAllocation);
+
+                        // Notify
+                        await NotifyAsync(context, userId, NotificationType.AdvisorRan,
+                            "Portfolio Advisor updated",
+                            $"{advice.TotalAllocations} allocations suggested, ${advice.TotalSuggestedAllocation:N0} total",
+                            NotificationPriority.Low, "/portfolio-advisor", advice.Id.ToString(), ct);
 
                         // ═══════════════════════════════════════════════════════════════
                         // AUTO-EXECUTE: Create positions from advisor allocations
@@ -718,6 +827,25 @@ public class BackgroundPatternScannerService : BackgroundService
                                     var rationale = allocEl.TryGetProperty("rationale", out var ratProp)
                                         ? ratProp.GetString() ?? "" : "";
 
+                                    // Derive stop/target from the best active pattern for this symbol
+                                    var bestPattern = livePatterns
+                                        .Where(p => p.Asset == symbol && p.Status == PatternStatus.Active)
+                                        .OrderByDescending(p => p.Confidence)
+                                        .FirstOrDefault();
+
+                                    var stopLoss = bestPattern?.SuggestedStop ?? 0;
+                                    var target1 = bestPattern?.SuggestedTarget ?? 0;
+
+                                    // If pattern has no levels, derive from ATR-style defaults (2% stop, 4% target)
+                                    if (stopLoss <= 0)
+                                        stopLoss = direction == SignalType.Long
+                                            ? Math.Round(entryPrice * 0.98m, 2)
+                                            : Math.Round(entryPrice * 1.02m, 2);
+                                    if (target1 <= 0)
+                                        target1 = direction == SignalType.Long
+                                            ? Math.Round(entryPrice * 1.04m, 2)
+                                            : Math.Round(entryPrice * 0.96m, 2);
+
                                     var position = new Position
                                     {
                                         Symbol = symbol,
@@ -725,6 +853,8 @@ public class BackgroundPatternScannerService : BackgroundService
                                         SignalType = direction,
                                         EntryPrice = entryPrice,
                                         Quantity = quantity,
+                                        StopLoss = stopLoss,
+                                        Target1 = target1,
                                         CurrentPrice = entryPrice,
                                         Status = PositionStatus.Open,
                                         IsAiGenerated = true,
@@ -751,6 +881,11 @@ public class BackgroundPatternScannerService : BackgroundService
                                 await context.SaveChangesAsync(ct);
                                 _logger.LogInformation("🤖 AI Advisor auto-executed {Count} positions for user {UserId}",
                                     positionsCreated, userId);
+
+                                await NotifyAsync(context, userId, NotificationType.PositionOpened,
+                                    $"AI opened {positionsCreated} position{(positionsCreated > 1 ? "s" : "")}",
+                                    $"Portfolio Advisor auto-executed {positionsCreated} allocation{(positionsCreated > 1 ? "s" : "")}",
+                                    NotificationPriority.Normal, "/portfolio", ct: ct);
                             }
                         }
                     }
@@ -875,6 +1010,116 @@ public class BackgroundPatternScannerService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to create AI position for {Symbol}", item.Symbol);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // MARKET HOURS AWARENESS
+    // ══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Infer asset class from symbol name.
+    /// </summary>
+    private static AssetClassCategory InferAssetClass(string symbol)
+    {
+        if (string.IsNullOrEmpty(symbol)) return AssetClassCategory.Stock;
+
+        var s = symbol.ToUpperInvariant().Trim();
+
+        // Crypto: ends with USD/USDT/BTC/ETH and starts with known crypto prefixes,
+        // or contains common crypto patterns
+        var cryptoPrefixes = new[] { "BTC", "ETH", "ADA", "SOL", "XRP", "DOT", "DOGE", "AVAX", "LINK",
+            "MATIC", "UNI", "AAVE", "ATOM", "LTC", "SHIB", "ARB", "OP", "APT", "SUI", "NEAR",
+            "FTM", "CRO", "ALGO", "XLM", "VET", "HBAR", "ICP", "FIL", "SAND", "MANA", "AXS",
+            "EOS", "TRX", "PEPE", "WIF", "BONK", "RNDR", "INJ", "TIA", "SEI", "JUP", "WLD" };
+
+        foreach (var prefix in cryptoPrefixes)
+        {
+            if (s.StartsWith(prefix) && (s.EndsWith("USD") || s.EndsWith("USDT") || s.EndsWith("BTC") || s.EndsWith("ETH")))
+                return AssetClassCategory.Crypto;
+        }
+
+        // Forex: contains slash (EUR/USD) or is 6-char pair ending in known currencies
+        if (s.Contains('/')) return AssetClassCategory.Forex;
+        var forexCurrencies = new[] { "USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD" };
+        if (s.Length == 6)
+        {
+            var first3 = s[..3];
+            var last3 = s[3..];
+            if (forexCurrencies.Contains(first3) && forexCurrencies.Contains(last3))
+                return AssetClassCategory.Forex;
+        }
+
+        // Default: stock/equity
+        return AssetClassCategory.Stock;
+    }
+
+    /// <summary>
+    /// Check if the market for a given symbol is currently open for trading.
+    /// Crypto: 24/7. Forex: Sun 5pm - Fri 5pm ET. Stocks: Mon-Fri 9:30am-4pm ET (with pre/post buffers).
+    /// </summary>
+    private static bool IsMarketOpen(string symbol)
+    {
+        var assetClass = InferAssetClass(symbol);
+        var et = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("America/New_York"));
+        var day = et.DayOfWeek;
+        var time = et.TimeOfDay;
+
+        return assetClass switch
+        {
+            AssetClassCategory.Crypto => true, // 24/7/365
+
+            AssetClassCategory.Forex =>
+                // Forex: Sunday 5pm ET to Friday 5pm ET
+                day switch
+                {
+                    DayOfWeek.Saturday => false,
+                    DayOfWeek.Sunday => time >= new TimeSpan(17, 0, 0), // Opens Sunday 5pm ET
+                    DayOfWeek.Friday => time < new TimeSpan(17, 0, 0),  // Closes Friday 5pm ET
+                    _ => true // Mon-Thu: 24 hours
+                },
+
+            _ => // Stocks: Mon-Fri, 4am-8pm ET (includes pre-market 4am and after-hours to 8pm)
+                day >= DayOfWeek.Monday && day <= DayOfWeek.Friday
+                && time >= new TimeSpan(4, 0, 0)
+                && time <= new TimeSpan(20, 0, 0)
+        };
+    }
+
+    private enum AssetClassCategory { Stock, Crypto, Forex }
+
+    /// <summary>
+    /// Create and save a notification for a user.
+    /// </summary>
+    private async Task NotifyAsync(
+        ApplicationDbContext context,
+        string userId,
+        NotificationType type,
+        string title,
+        string message,
+        NotificationPriority priority = NotificationPriority.Normal,
+        string? linkUrl = null,
+        string? referenceId = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            context.Notifications.Add(new Notification
+            {
+                Title = title,
+                Message = message,
+                Type = type,
+                Priority = priority,
+                LinkUrl = linkUrl,
+                ReferenceId = referenceId,
+                UserId = userId
+            });
+            await context.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to create notification for {UserId}", userId);
         }
     }
 }

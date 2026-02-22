@@ -94,6 +94,11 @@ builder.Services.AddHttpClient<SimulationApiClient>(client =>
     client.BaseAddress = new Uri(apiBase);
 });
 
+builder.Services.AddHttpClient<NotificationApiClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBase);
+});
+
 builder.Services.AddHttpClient("WatchlistAPI", client =>
 {
     client.BaseAddress = new Uri(apiBase);

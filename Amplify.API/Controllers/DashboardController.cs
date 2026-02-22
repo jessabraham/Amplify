@@ -191,6 +191,43 @@ public class DashboardController : ControllerBase
             }
             catch { /* RegimeHistory table may not exist yet */ }
 
+            // ── AI vs Manual breakdown ─────────────────────────────────
+            var aiOpenPnL = 0m;
+            var manualOpenPnL = 0m;
+            var aiOpenCount = 0;
+            var manualOpenCount = 0;
+            var aiClosedPnL = 0m;
+            var manualClosedPnL = 0m;
+            var aiClosedCount = 0;
+            var manualClosedCount = 0;
+            var activePatternCount = 0;
+
+            try
+            {
+                var allOpenPositions = await _context.Positions
+                    .Where(p => p.UserId == userId && p.Status == PositionStatus.Open && p.IsActive)
+                    .ToListAsync();
+
+                aiOpenCount = allOpenPositions.Count(p => p.IsAiGenerated);
+                manualOpenCount = allOpenPositions.Count(p => !p.IsAiGenerated);
+                aiOpenPnL = allOpenPositions.Where(p => p.IsAiGenerated).Sum(p => p.UnrealizedPnL);
+                manualOpenPnL = allOpenPositions.Where(p => !p.IsAiGenerated).Sum(p => p.UnrealizedPnL);
+
+                var closedPositions = await _context.Positions
+                    .Where(p => p.UserId == userId && p.Status == PositionStatus.Closed)
+                    .ToListAsync();
+
+                aiClosedCount = closedPositions.Count(p => p.IsAiGenerated);
+                manualClosedCount = closedPositions.Count(p => !p.IsAiGenerated);
+                aiClosedPnL = closedPositions.Where(p => p.IsAiGenerated).Sum(p => p.RealizedPnL);
+                manualClosedPnL = closedPositions.Where(p => !p.IsAiGenerated).Sum(p => p.RealizedPnL);
+
+                activePatternCount = await _context.DetectedPatterns
+                    .CountAsync(p => p.UserId == userId
+                        && (p.Status == Domain.Enumerations.PatternStatus.Active || p.Status == Domain.Enumerations.PatternStatus.PlayingOut));
+            }
+            catch { }
+
             return Ok(new
             {
                 TotalSignals = totalSignals,
@@ -202,7 +239,7 @@ public class DashboardController : ControllerBase
                 RegimeBreakdown = regimeBreakdown,
                 AssetBreakdown = assetBreakdown,
                 RecentSignals = recentSignals,
-                // New fields
+                // Portfolio
                 TotalInvested = Math.Round(totalInvested, 2),
                 TotalUnrealizedPnL = Math.Round(totalUnrealizedPnL, 2),
                 OpenPositionCount = openPositionCount,
@@ -212,7 +249,17 @@ public class DashboardController : ControllerBase
                 PortfolioValue = Math.Round(startingCapital + realizedPnL + totalUnrealizedPnL, 2),
                 TopPositions = portfolioPositions,
                 RecentPatterns = recentPatterns,
-                RecentRegimes = recentRegimes
+                RecentRegimes = recentRegimes,
+                // AI vs Manual
+                AiOpenCount = aiOpenCount,
+                ManualOpenCount = manualOpenCount,
+                AiOpenPnL = Math.Round(aiOpenPnL, 2),
+                ManualOpenPnL = Math.Round(manualOpenPnL, 2),
+                AiClosedPnL = Math.Round(aiClosedPnL, 2),
+                ManualClosedPnL = Math.Round(manualClosedPnL, 2),
+                AiClosedCount = aiClosedCount,
+                ManualClosedCount = manualClosedCount,
+                ActivePatternCount = activePatternCount
             });
         }
         catch (Exception ex)

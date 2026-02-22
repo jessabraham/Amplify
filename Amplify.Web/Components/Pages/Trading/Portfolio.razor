@@ -3,6 +3,8 @@
 @inject PortfolioApiClient PortfolioApi
 @inject AuthStateProvider AuthState
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IHttpClientFactory HttpFactory
 @using Amplify.Application.Common.DTOs.Trading
 @using Amplify.Domain.Enumerations
 @using Amplify.Web.Services
@@ -113,7 +115,15 @@
                         var dirClass = p.SignalType.ToString().ToLower() == "short" ? "short" : "long";
                         <div class="signal-card @dirClass">
                             <div class="signal-card-header">
-                                <span class="signal-asset">@p.Symbol</span>
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span class="signal-asset">@p.Symbol</span>
+                                    @if (p.IsAiGenerated)
+                                    {
+                                        <span style="font-size: 0.55rem; padding: 1px 6px; border-radius: 8px; background: rgba(99,102,241,0.2); color: var(--accent-purple); font-weight: 600;">
+                                            <i class="ph-bold ph-robot" style="margin-right: 2px;"></i>AI
+                                        </span>
+                                    }
+                                </div>
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <span class="signal-type-badge @dirClass">
                                         @if (dirClass == "long")
@@ -167,6 +177,14 @@
                                 </div>
                             </div>
 
+                            <!-- Chart toggle button -->
+                            <div style="margin-top: 8px;">
+                                <button class="btn btn-secondary" style="font-size: 0.6rem; padding: 2px 8px; width: 100%; opacity: 0.7;"
+                                        @onclick="() => ToggleChart(p)">
+                                    <i class="ph-light ph-chart-line" style="margin-right: 3px;"></i>@(_chartVisibleFor == p.Id ? "Hide Chart" : "Chart")
+                                </button>
+                            </div>
+
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);">
                                 <span style="font-size: 0.7rem; color: var(--text-muted);">
                                     <i class="ph-thin ph-clock" style="margin-right: 3px;"></i>@p.EntryDateUtc.ToString("MMM dd, HH:mm")
@@ -174,7 +192,14 @@
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     @{
                                         var planUrl = $"/planner?symbol={p.Symbol}";
+                                        var qcDir = p.SignalType == SignalType.Short ? -1 : 1;
+                                        var qcPnl = qcDir * (p.CurrentPrice - p.EntryPrice) * p.Quantity;
                                     }
+                                    <button class="btn btn-secondary" style="font-size: 0.65rem; padding: 3px 8px; color: @(qcPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)");"
+                                            @onclick="() => QuickClose(p)"
+                                            title="Close at current price (@p.CurrentPrice.ToString("C2"))">
+                                        <i class="ph-bold ph-lightning" style="margin-right: 2px;"></i>@(qcPnl >= 0 ? "+" : "")@qcPnl.ToString("C0")
+                                    </button>
                                     <a href="@planUrl" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px;">
                                         <i class="ph-light ph-path" style="margin-right: 3px;"></i>Plan
                                     </a>
@@ -203,6 +228,54 @@
                         </div>
                     }
                 </div>
+
+                <!-- Full-width chart panel -->
+                @if (_chartVisibleFor.HasValue)
+                {
+                    var chartPos = _summary.OpenPositions.FirstOrDefault(p => p.Id == _chartVisibleFor);
+                    if (chartPos is not null)
+                    {
+                        var fwChartId = $"mini-chart-{chartPos.Id.ToString()[..8]}";
+                        <div class="card" style="margin-top: 16px; padding: 16px; border-left: 3px solid var(--accent-cyan);">
+                            <!-- Header row -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-weight: 700; font-size: 1.1rem; color: var(--text-heading);">@chartPos.Symbol</span>
+                                    @if (chartPos.IsAiGenerated)
+                                    {
+                                        <span style="font-size: 0.55rem; padding: 1px 6px; border-radius: 8px; background: rgba(99,102,241,0.2); color: var(--accent-purple); font-weight: 600;">AI</span>
+                                    }
+                                    <span style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.15); color: var(--accent-blue);">▶ Entry @chartPos.EntryPrice.ToString("C2")</span>
+                                    <span style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: rgba(239,68,68,0.15); color: var(--accent-red);">✗ Stop @chartPos.StopLoss.ToString("C2")</span>
+                                    <span style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: rgba(16,185,129,0.15); color: var(--accent-green);">✓ Target @chartPos.Target1.ToString("C2")</span>
+                                </div>
+                                <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 10px;" @onclick="() => ToggleChart(chartPos)">
+                                    <i class="ph-light ph-x" style="margin-right: 3px;"></i>Close
+                                </button>
+                            </div>
+
+                            <!-- Interval selector -->
+                            <div style="display: flex; gap: 4px; margin-bottom: 10px;">
+                                @foreach (var tf in new[] { ("1H", "1H"), ("4H", "4H"), ("D", "Daily"), ("W", "Weekly") })
+                                {
+                                    var isActive = _chartTimeframe == tf.Item2;
+                                    <button style="padding: 4px 12px; font-size: 0.7rem; font-weight: @(isActive ? "700" : "400"); border-radius: 4px; border: 1px solid @(isActive ? "var(--accent-cyan)" : "var(--border)"); background: @(isActive ? "rgba(6,182,212,0.15)" : "transparent"); color: @(isActive ? "var(--accent-cyan)" : "var(--text-muted)"); cursor: pointer; transition: all 0.15s;"
+                                            @onclick="() => SwitchChartTimeframe(chartPos, tf.Item2)">
+                                        @tf.Item1
+                                    </button>
+                                }
+                            </div>
+
+                            @if (_chartLoading)
+                            {
+                                <div style="display: flex; align-items: center; justify-content: center; height: 500px;">
+                                    <i class="ph ph-circle-notch" style="font-size: 1.5rem; color: var(--accent-cyan); animation: spin 1s linear infinite;"></i>
+                                </div>
+                            }
+                            <div id="@fwChartId" style="border-radius: 6px; overflow: hidden; min-height: 500px; @(_chartLoading ? "display:none;" : "")"></div>
+                        </div>
+                    }
+                }
             }
         }
         else
@@ -337,10 +410,40 @@
     <!-- Close Position Modal -->
     @if (_showCloseModal && _closingPosition is not null)
     {
+        var cmDir = _closingPosition.SignalType == SignalType.Short ? -1 : 1;
+        var cmPnl = cmDir * (_exitPrice - _closingPosition.EntryPrice) * _closingPosition.Quantity;
+        var cmPct = _closingPosition.EntryPrice > 0 ? cmDir * (_exitPrice - _closingPosition.EntryPrice) / _closingPosition.EntryPrice * 100 : 0;
         <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: center; justify-content: center;"
              @onclick="() => _showCloseModal = false">
-            <div class="card" style="width: 360px;" @onclick:stopPropagation="true">
-                <h3 style="margin-bottom: 16px;"><i class="ph-duotone ph-x-circle" style="margin-right: 6px; color: var(--accent-amber);"></i>Close @_closingPosition.Symbol</h3>
+            <div class="card" style="width: 400px;" @onclick:stopPropagation="true">
+                <h3 style="margin-bottom: 16px;">
+                    <i class="ph-duotone ph-x-circle" style="margin-right: 6px; color: var(--accent-amber);"></i>Close @_closingPosition.Symbol
+                    @if (_closingPosition.IsAiGenerated)
+                    {
+                        <span style="font-size: 0.6rem; padding: 2px 6px; border-radius: 8px; background: rgba(99,102,241,0.2); color: var(--accent-purple); margin-left: 6px; vertical-align: middle;">AI</span>
+                    }
+                </h3>
+
+                <!-- Position context -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; font-size: 0.75rem;">
+                    <div>
+                        <div style="color: var(--text-muted); font-size: 0.65rem;">Entry</div>
+                        <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace;">@_closingPosition.EntryPrice.ToString("C2")</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-muted); font-size: 0.65rem;">Stop</div>
+                        <div style="font-weight: 600; color: var(--accent-red); font-family: 'JetBrains Mono', monospace;">@_closingPosition.StopLoss.ToString("C2")</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-muted); font-size: 0.65rem;">Target</div>
+                        <div style="font-weight: 600; color: var(--accent-green); font-family: 'JetBrains Mono', monospace;">@_closingPosition.Target1.ToString("C2")</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-muted); font-size: 0.65rem;">Qty</div>
+                        <div style="font-weight: 600; font-family: 'JetBrains Mono', monospace;">@_closingPosition.Quantity.ToString("G")</div>
+                    </div>
+                </div>
+
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                     <div>
                         <label style="font-size: 0.75rem; color: var(--text-muted);">Exit Price</label>
@@ -349,6 +452,21 @@
                     <div>
                         <label style="font-size: 0.75rem; color: var(--text-muted);">Notes (optional)</label>
                         <input type="text" class="form-input" @bind="_closeNotes" />
+                    </div>
+                </div>
+
+                <!-- P&L Preview -->
+                <div style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; background: @(cmPnl >= 0 ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)"); border: 1px solid @(cmPnl >= 0 ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)");">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">Estimated P&amp;L</span>
+                        <div style="text-align: right;">
+                            <span style="font-weight: 700; font-size: 1.1rem; font-family: 'JetBrains Mono', monospace; color: @(cmPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)");">
+                                @((cmPnl >= 0 ? "+" : "") + cmPnl.ToString("C2"))
+                            </span>
+                            <span style="font-size: 0.7rem; color: @(cmPct >= 0 ? "var(--accent-green)" : "var(--accent-red)"); margin-left: 6px;">
+                                (@((cmPct >= 0 ? "+" : "") + cmPct.ToString("F2"))%)
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -421,6 +539,11 @@
     private bool _showDeleteModal;
     private PositionDto? _deletingPosition;
     private Guid? _openMenuId;
+
+    // Chart
+    private Guid? _chartVisibleFor;
+    private string _chartTimeframe = "1H";
+    private bool _chartLoading;
 
     // Snapshot
     private bool _snapshotting;
@@ -498,6 +621,33 @@
         _closeNotes = null;
         _error = null;
         _showCloseModal = true;
+    }
+
+    private async Task QuickClose(PositionDto position)
+    {
+        _error = null;
+        _submitting = true;
+        try
+        {
+            var dto = new ClosePositionDto
+            {
+                PositionId = position.Id,
+                ExitPrice = position.CurrentPrice,
+                Notes = "Quick close at market price"
+            };
+            var result = await PortfolioApi.ClosePositionAsync(dto);
+            if (result is not null)
+            {
+                _closedPositions.Clear();
+                await LoadSummary();
+            }
+            else
+            {
+                _error = "Failed to close position.";
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _submitting = false; }
     }
 
     private async Task SubmitClose()
@@ -580,4 +730,96 @@
 
     private static string PnlClass(decimal pnl) =>
         pnl >= 0 ? "positive" : "negative";
+
+    private async Task ToggleChart(PositionDto position)
+    {
+        if (_chartVisibleFor == position.Id)
+        {
+            var disposeId = $"mini-chart-{position.Id.ToString()[..8]}";
+            try { await JS.InvokeVoidAsync("disposeMiniChart", disposeId); } catch { }
+            _chartVisibleFor = null;
+            return;
+        }
+
+        _chartVisibleFor = position.Id;
+        _chartTimeframe = "1H";
+        await LoadChart(position, "1H");
+    }
+
+    private async Task SwitchChartTimeframe(PositionDto position, string timeframe)
+    {
+        _chartTimeframe = timeframe;
+        await LoadChart(position, timeframe);
+    }
+
+    private async Task LoadChart(PositionDto position, string timeframe)
+    {
+        _chartLoading = true;
+        StateHasChanged();
+        await Task.Delay(50);
+
+        var chartId = $"mini-chart-{position.Id.ToString()[..8]}";
+        var candleCount = timeframe switch
+        {
+            "Weekly" => 52,
+            "Daily" => 120,
+            "4H" => 100,
+            _ => 120
+        };
+
+        try
+        {
+            var token = AuthState.Token;
+            var http = HttpFactory.CreateClient("WatchlistAPI");
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"api/Chart/candles?symbol={position.Symbol}&count={candleCount}&timeframe={timeframe}");
+            if (!string.IsNullOrEmpty(token))
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            var response = await http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var candles = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+
+                var isLong = position.SignalType != SignalType.Short;
+                var entryUnix = new DateTimeOffset(position.EntryDateUtc, TimeSpan.Zero).ToUnixTimeSeconds();
+                var isClosed = position.Status.ToString() == "Closed" || position.ExitPrice > 0;
+                var exitUnix = position.ExitDateUtc.HasValue
+                    ? new DateTimeOffset(position.ExitDateUtc.Value, TimeSpan.Zero).ToUnixTimeSeconds()
+                    : 0L;
+
+                var options = new
+                {
+                    height = 500,
+                    symbol = position.Symbol,
+                    entry = (double)position.EntryPrice,
+                    stop = (double)position.StopLoss,
+                    target = (double)position.Target1,
+                    currentPrice = (double)position.CurrentPrice,
+                    entryTime = entryUnix,
+                    isLong = isLong,
+                    isClosed = isClosed,
+                    exitPrice = (double)(position.ExitPrice ?? 0m),
+                    exitTime = exitUnix,
+                    showVolume = true
+                };
+
+                _chartLoading = false;
+                StateHasChanged();
+                await Task.Delay(50);
+
+                await JS.InvokeVoidAsync("createMiniChart", chartId, candles, options);
+            }
+            else
+            {
+                _chartLoading = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Chart error: {ex.Message}");
+            _chartLoading = false;
+        }
+    }
 }

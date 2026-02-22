@@ -211,6 +211,25 @@
                                 </div>
                             }
 
+                            @if (!string.IsNullOrEmpty(alloc.PatternSummary) || alloc.PatternIds.Any())
+                            {
+                                <div style="margin-top: 6px; font-size: 0.7rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                    <i class="ph-duotone ph-chart-line" style="color: var(--accent-purple);"></i>
+                                    @if (!string.IsNullOrEmpty(alloc.PatternSummary))
+                                    {
+                                        <span style="color: var(--text-muted);">@alloc.PatternSummary</span>
+                                    }
+                                    @foreach (var pid in alloc.PatternIds.Take(3))
+                                    {
+                                        <a href="/pattern-lifecycle?highlight=@pid"
+                                           @onclick:stopPropagation="true"
+                                           style="font-size: 0.6rem; padding: 1px 6px; border-radius: 8px; background: rgba(99,102,241,0.15); color: var(--accent-purple); text-decoration: none; font-family: 'JetBrains Mono', monospace;">
+                                            @pid[..Math.Min(8, pid.Length)]
+                                        </a>
+                                    }
+                                </div>
+                            }
+
                             <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
                                 <a href="/planner?symbol=@alloc.Symbol&budget=@((int)alloc.SuggestedBudget)" class="btn btn-primary" style="font-size: 0.8rem; width: 100%; text-align: center;">
                                     <i class="ph-bold ph-arrow-right" style="margin-right: 6px;"></i>Open in Trade Planner — @alloc.SuggestedBudget.ToString("C0")
@@ -235,6 +254,83 @@
             <i class="ph-thin ph-chart-pie-slice" style="font-size: 3rem; color: var(--text-muted);"></i>
             <p style="color: var(--text-muted); font-size: 1.1rem; margin-top: 12px;">Click <strong>"Get AI Allocation Advice"</strong> to analyze your watchlist and get position sizing suggestions.</p>
             <p style="color: var(--text-muted); font-size: 0.85rem;">The AI will consider your cash available, open positions, market regimes, and recent patterns.</p>
+        </div>
+    }
+
+    <!-- Advisor Scorecard -->
+    @if (_scorecard is not null && _scorecard.TotalExecuted > 0)
+    {
+        <div class="card" style="margin-top: 24px; border-left: 3px solid var(--accent-purple);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="ph-duotone ph-chart-bar" style="font-size: 1.1rem; color: var(--accent-purple);"></i>
+                    <span style="font-weight: 700; color: var(--text-heading);">Advisor Scorecard</span>
+                    <span style="font-size: 0.6rem; background: rgba(99,102,241,0.15); color: var(--accent-purple); padding: 2px 8px; border-radius: 10px;">@_scorecard.AdviceCount runs</span>
+                </div>
+            </div>
+
+            <!-- Top-level stats -->
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;">
+                <div class="pattern-level">
+                    <div class="pattern-level-label">Allocations</div>
+                    <div class="pattern-level-value">@_scorecard.TotalAllocations</div>
+                </div>
+                <div class="pattern-level">
+                    <div class="pattern-level-label">Executed</div>
+                    <div class="pattern-level-value">@_scorecard.TotalExecuted <span style="font-size: 0.6rem; color: var(--text-muted);">(@_scorecard.ExecutionRate%)</span></div>
+                </div>
+                <div class="pattern-level">
+                    <div class="pattern-level-label">Win Rate</div>
+                    <div class="pattern-level-value" style="color: @(_scorecard.WinRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">@_scorecard.WinRate%</div>
+                </div>
+                <div class="pattern-level">
+                    <div class="pattern-level-label">Total P&amp;L</div>
+                    <div class="pattern-level-value" style="color: @(_scorecard.TotalPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@((_scorecard.TotalPnL >= 0 ? "+" : "") + _scorecard.TotalPnL.ToString("C0"))</div>
+                </div>
+                <div class="pattern-level">
+                    <div class="pattern-level-label">AI / Manual</div>
+                    <div class="pattern-level-value" style="font-size: 0.85rem;">
+                        <span style="color: var(--accent-purple);">@_scorecard.AiExecuted</span>
+                        <span style="color: var(--text-muted); margin: 0 4px;">/</span>
+                        <span style="color: var(--accent-cyan);">@_scorecard.ManualExecuted</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confidence breakdown -->
+            <div style="font-size: 0.7rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+                Performance by Confidence Level
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                @foreach (var c in _scorecard.ByConfidence.OrderByDescending(c => c.Confidence == "High" ? 3 : c.Confidence == "Medium" ? 2 : 1))
+                {
+                    var confColor = c.Confidence == "High" ? "var(--accent-green)" : c.Confidence == "Medium" ? "var(--accent-amber)" : "var(--text-muted)";
+                    var bgColor = c.Confidence == "High" ? "rgba(16,185,129,0.08)" : c.Confidence == "Medium" ? "rgba(245,158,11,0.08)" : "rgba(107,114,128,0.08)";
+                    <div style="padding: 10px 14px; border-radius: 6px; background: @bgColor; border: 1px solid @(c.Confidence == "High" ? "rgba(16,185,129,0.2)" : c.Confidence == "Medium" ? "rgba(245,158,11,0.2)" : "rgba(107,114,128,0.15)");">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-weight: 700; color: @confColor;">@c.Confidence</span>
+                            <span style="font-size: 0.65rem; color: var(--text-muted);">@c.Executed / @c.Total executed</span>
+                        </div>
+                        @if (c.Executed > 0)
+                        {
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+                                <div>
+                                    <span style="color: var(--text-muted); font-size: 0.65rem;">Win Rate</span>
+                                    <div style="font-weight: 700; color: @(c.WinRate >= 50 ? "var(--accent-green)" : "var(--accent-red)");">@c.WinRate%</div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="color: var(--text-muted); font-size: 0.65rem;">P&amp;L</span>
+                                    <div style="font-weight: 700; font-family: 'JetBrains Mono', monospace; color: @(c.TotalPnL >= 0 ? "var(--accent-green)" : "var(--accent-red)");">@((c.TotalPnL >= 0 ? "+" : "") + c.TotalPnL.ToString("C0"))</div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">No executions yet</div>
+                        }
+                    </div>
+                }
+            </div>
         </div>
     }
 
@@ -372,6 +468,24 @@
                                                     </a>
                                                 </div>
                                             }
+                                            @if (!aSkip && (!string.IsNullOrEmpty(a.PatternSummary) || a.PatternIds.Any()))
+                                            {
+                                                <div style="margin-top: 4px; font-size: 0.6rem; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                                                    <i class="ph-light ph-chart-line" style="color: var(--accent-purple);"></i>
+                                                    @if (!string.IsNullOrEmpty(a.PatternSummary))
+                                                    {
+                                                        <span style="color: var(--text-muted);">@a.PatternSummary</span>
+                                                    }
+                                                    @foreach (var pid in a.PatternIds.Take(2))
+                                                    {
+                                                        <a href="/pattern-lifecycle?highlight=@pid"
+                                                           @onclick:stopPropagation="true"
+                                                           style="font-size: 0.55rem; padding: 1px 4px; border-radius: 6px; background: rgba(99,102,241,0.12); color: var(--accent-purple); text-decoration: none; font-family: 'JetBrains Mono', monospace;">
+                                                            @pid[..Math.Min(8, pid.Length)]
+                                                        </a>
+                                                    }
+                                                </div>
+                                            }
                                         </div>
                                     }
                                 </div>
@@ -409,6 +523,9 @@
     // All positions for matching against past advice
     private List<PositionDto> _allPositions = new();
 
+    // Scorecard
+    private AdvisorScorecard? _scorecard;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _loaded) return;
@@ -427,6 +544,9 @@
             var watchlist = await WatchlistApi.GetWatchlistAsync();
             _watchlistCount = watchlist.Count(w => w.IsActive);
             _history = await AdvisorApi.GetAdviceHistoryAsync(10);
+
+            // Load scorecard
+            try { _scorecard = await AdvisorApi.GetScorecardAsync(); } catch { }
 
             // Load AI-generated open positions for badge display
             try

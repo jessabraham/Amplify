@@ -1,0 +1,191 @@
+﻿@rendermode InteractiveServer
+@inject NotificationApiClient NotifApi
+@inject AuthStateProvider AuthState
+@inject NavigationManager Nav
+@using Amplify.Web.Services
+@implements IDisposable
+
+<div style="position: relative;" @onclick:stopPropagation="true">
+    <button @onclick="TogglePanel" style="background: none; border: none; cursor: pointer; position: relative; padding: 6px 8px; border-radius: 6px; transition: background 0.15s;"
+            onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background='none'">
+        <i class="ph ph-bell" style="font-size: 1.2rem; color: var(--text-muted);"></i>
+        @if (_unreadCount > 0)
+        {
+            <span style="position: absolute; top: 2px; right: 2px; background: var(--accent-red); color: white; font-size: 0.55rem; font-weight: 700; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px;">
+                @(_unreadCount > 9 ? "9+" : _unreadCount.ToString())
+            </span>
+        }
+    </button>
+
+    @if (_showPanel)
+    {
+        <!-- Backdrop to close panel -->
+        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 999;" @onclick="() => _showPanel = false"></div>
+
+        <!-- Panel: fixed position, anchored to bottom-left of sidebar -->
+        <div style="position: fixed; left: 248px; bottom: 16px; width: 360px; max-height: 480px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 1000; overflow: hidden; display: flex; flex-direction: column;">
+            <!-- Header -->
+            <div style="padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-heading);">
+                    <i class="ph-duotone ph-bell-ringing" style="margin-right: 6px; color: var(--accent-cyan);"></i>Notifications
+                </span>
+                @if (_unreadCount > 0)
+                {
+                    <button @onclick="MarkAllRead" style="background: none; border: none; cursor: pointer; font-size: 0.7rem; color: var(--accent-cyan); padding: 2px 8px; border-radius: 4px; transition: background 0.15s;"
+                            onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background='none'">
+                        Mark all read
+                    </button>
+                }
+            </div>
+
+            <!-- Notification list -->
+            <div style="overflow-y: auto; max-height: 400px; flex: 1;">
+                @if (!_notifications.Any())
+                {
+                    <div style="padding: 32px 16px; text-align: center;">
+                        <i class="ph-thin ph-bell-slash" style="font-size: 2rem; color: var(--text-muted);"></i>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 8px;">No notifications yet</p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var n in _notifications)
+                    {
+                        var icon = GetIcon(n.Type);
+                        var iconColor = GetIconColor(n.Type);
+                        var bgStyle = n.IsRead ? "" : "background: rgba(6,182,212,0.04);";
+                        <div style="padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; @bgStyle"
+                             onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background='@(n.IsRead ? "transparent" : "rgba(6,182,212,0.04)")'"
+                             @onclick="() => HandleClick(n)">
+                            <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                <i class="@icon" style="font-size: 1rem; color: @iconColor; margin-top: 2px; flex-shrink: 0;"></i>
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                        <span style="font-weight: @(n.IsRead ? "400" : "600"); font-size: 0.78rem; color: var(--text-heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@n.Title</span>
+                                        @if (!n.IsRead)
+                                        {
+                                            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-cyan); flex-shrink: 0;"></span>
+                                        }
+                                    </div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@n.Message</div>
+                                    <div style="font-size: 0.6rem; color: var(--text-muted); margin-top: 3px; opacity: 0.7;">@FormatAge(n.CreatedAt)</div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private int _unreadCount;
+    private List<NotificationItem> _notifications = new();
+    private bool _showPanel;
+    private Timer? _pollTimer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated != true) return;
+
+        await RefreshCount();
+
+        // Poll every 30 seconds for new notifications
+        _pollTimer = new Timer(async _ =>
+        {
+            try
+            {
+                await RefreshCount();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch { }
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+
+        StateHasChanged();
+    }
+
+    private async Task RefreshCount()
+    {
+        _unreadCount = await NotifApi.GetUnreadCountAsync();
+    }
+
+    private async Task TogglePanel()
+    {
+        _showPanel = !_showPanel;
+        if (_showPanel)
+        {
+            _notifications = await NotifApi.GetNotificationsAsync(20);
+        }
+    }
+
+    private async Task HandleClick(NotificationItem n)
+    {
+        if (!n.IsRead)
+        {
+            await NotifApi.MarkReadAsync(n.Id);
+            n.IsRead = true;
+            _unreadCount = Math.Max(0, _unreadCount - 1);
+        }
+
+        _showPanel = false;
+
+        if (!string.IsNullOrEmpty(n.LinkUrl))
+        {
+            Nav.NavigateTo(n.LinkUrl);
+        }
+    }
+
+    private async Task MarkAllRead()
+    {
+        await NotifApi.MarkAllReadAsync();
+        _unreadCount = 0;
+        foreach (var n in _notifications)
+            n.IsRead = true;
+    }
+
+    private static string GetIcon(string type) => type switch
+    {
+        "PatternDetected" => "ph-duotone ph-chart-line",
+        "PatternHitTarget" => "ph-duotone ph-target",
+        "PatternHitStop" => "ph-duotone ph-shield-warning",
+        "PatternExpired" => "ph-duotone ph-clock-countdown",
+        "AdvisorRan" => "ph-duotone ph-brain",
+        "PositionOpened" => "ph-duotone ph-arrow-circle-right",
+        "PositionClosed" => "ph-duotone ph-x-circle",
+        "PositionAutoClosedTarget" => "ph-duotone ph-check-circle",
+        "PositionAutoClosedStop" => "ph-duotone ph-warning-circle",
+        "SystemAlert" => "ph-duotone ph-info",
+        _ => "ph-duotone ph-bell"
+    };
+
+    private static string GetIconColor(string type) => type switch
+    {
+        "PatternDetected" => "var(--accent-cyan)",
+        "PatternHitTarget" or "PositionAutoClosedTarget" => "var(--accent-green)",
+        "PatternHitStop" or "PositionAutoClosedStop" => "var(--accent-red)",
+        "PatternExpired" => "var(--text-muted)",
+        "AdvisorRan" => "var(--accent-purple)",
+        "PositionOpened" => "var(--accent-blue)",
+        "PositionClosed" => "var(--accent-amber)",
+        _ => "var(--text-muted)"
+    };
+
+    private static string FormatAge(DateTime utc)
+    {
+        var age = DateTime.UtcNow - utc;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
+        if (age.TotalDays < 7) return $"{(int)age.TotalDays}d ago";
+        return utc.ToString("MMM dd");
+    }
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+}

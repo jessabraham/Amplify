@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@rendermode InteractiveServer
 
 <div class="page-wrapper">
     <nav class="sidebar">
@@ -15,87 +16,109 @@
                 Dashboard
             </NavLink>
 
-            <span class="sidebar-section-label">Trading</span>
-            <NavLink class="nav-link" href="planner">
-                <i class="ph ph-path nav-icon-ph"></i>
-                <i class="ph-fill ph-path nav-icon-ph-active"></i>
-                Trade Planner
-            </NavLink>
-            <NavLink class="nav-link" href="watchlist">
-                <i class="ph ph-binoculars nav-icon-ph"></i>
-                <i class="ph-fill ph-binoculars nav-icon-ph-active"></i>
-                Watchlist
-            </NavLink>
-            <NavLink class="nav-link" href="portfolio">
-                <i class="ph ph-wallet nav-icon-ph"></i>
-                <i class="ph-fill ph-wallet nav-icon-ph-active"></i>
-                Portfolio
-            </NavLink>
-            <NavLink class="nav-link" href="signals" Match="NavLinkMatch.All">
-                <i class="ph ph-chart-bar nav-icon-ph"></i>
-                <i class="ph-fill ph-chart-bar nav-icon-ph-active"></i>
-                Signals
-            </NavLink>
+            <!-- Trading (collapsible) -->
+            <button class="sidebar-section-toggle @(_collapsedSections.Contains("trading") ? "collapsed" : "")"
+                    @onclick='() => ToggleSection("trading")'>
+                <span>Trading</span>
+                <i class="ph-bold ph-caret-down"></i>
+            </button>
+            <div class="sidebar-section-items @(_collapsedSections.Contains("trading") ? "collapsed" : "")">
+                <NavLink class="nav-link" href="planner">
+                    <i class="ph ph-path nav-icon-ph"></i>
+                    <i class="ph-fill ph-path nav-icon-ph-active"></i>
+                    Trade Planner
+                </NavLink>
+                <NavLink class="nav-link" href="watchlist">
+                    <i class="ph ph-binoculars nav-icon-ph"></i>
+                    <i class="ph-fill ph-binoculars nav-icon-ph-active"></i>
+                    Watchlist
+                </NavLink>
+                <NavLink class="nav-link" href="portfolio">
+                    <i class="ph ph-wallet nav-icon-ph"></i>
+                    <i class="ph-fill ph-wallet nav-icon-ph-active"></i>
+                    Portfolio
+                </NavLink>
+                <NavLink class="nav-link" href="signals" Match="NavLinkMatch.All">
+                    <i class="ph ph-chart-bar nav-icon-ph"></i>
+                    <i class="ph-fill ph-chart-bar nav-icon-ph-active"></i>
+                    Signals
+                </NavLink>
+            </div>
 
-            <span class="sidebar-section-label">Tools</span>
-            <NavLink class="nav-link" href="scanner">
-                <i class="ph ph-crosshair nav-icon-ph"></i>
-                <i class="ph-fill ph-crosshair nav-icon-ph-active"></i>
-                Scanner
-            </NavLink>
-            <NavLink class="nav-link" href="advisor">
-                <i class="ph ph-robot nav-icon-ph"></i>
-                <i class="ph-fill ph-robot nav-icon-ph-active"></i>
-                AI Advisor
-            </NavLink>
-            <NavLink class="nav-link" href="risk">
-                <i class="ph ph-shield-check nav-icon-ph"></i>
-                <i class="ph-fill ph-shield-check nav-icon-ph-active"></i>
-                Risk Calculator
-            </NavLink>
-            <NavLink class="nav-link" href="regime">
-                <i class="ph ph-wave-sine nav-icon-ph"></i>
-                <i class="ph-fill ph-wave-sine nav-icon-ph-active"></i>
-                Regime Detector
-            </NavLink>
-            <NavLink class="nav-link" href="pattern-lifecycle">
-                <i class="ph ph-heartbeat nav-icon-ph"></i>
-                <i class="ph-fill ph-heartbeat nav-icon-ph-active"></i>
-                Pattern Lifecycle
-            </NavLink>
+            <!-- Tools (collapsible) -->
+            <button class="sidebar-section-toggle @(_collapsedSections.Contains("tools") ? "collapsed" : "")"
+                    @onclick='() => ToggleSection("tools")'>
+                <span>Tools</span>
+                <i class="ph-bold ph-caret-down"></i>
+            </button>
+            <div class="sidebar-section-items @(_collapsedSections.Contains("tools") ? "collapsed" : "")">
+                <NavLink class="nav-link" href="scanner">
+                    <i class="ph ph-crosshair nav-icon-ph"></i>
+                    <i class="ph-fill ph-crosshair nav-icon-ph-active"></i>
+                    Scanner
+                </NavLink>
+                <NavLink class="nav-link" href="advisor">
+                    <i class="ph ph-robot nav-icon-ph"></i>
+                    <i class="ph-fill ph-robot nav-icon-ph-active"></i>
+                    AI Advisor
+                </NavLink>
+                <NavLink class="nav-link" href="risk">
+                    <i class="ph ph-shield-check nav-icon-ph"></i>
+                    <i class="ph-fill ph-shield-check nav-icon-ph-active"></i>
+                    Risk Calculator
+                </NavLink>
+                <NavLink class="nav-link" href="regime">
+                    <i class="ph ph-wave-sine nav-icon-ph"></i>
+                    <i class="ph-fill ph-wave-sine nav-icon-ph-active"></i>
+                    Regime Detector
+                </NavLink>
+                <NavLink class="nav-link" href="pattern-lifecycle">
+                    <i class="ph ph-heartbeat nav-icon-ph"></i>
+                    <i class="ph-fill ph-heartbeat nav-icon-ph-active"></i>
+                    Pattern Lifecycle
+                </NavLink>
+            </div>
 
-            <span class="sidebar-section-label">Analytics</span>
-            <NavLink class="nav-link" href="performance">
-                <i class="ph ph-trend-up nav-icon-ph"></i>
-                <i class="ph-fill ph-trend-up nav-icon-ph-active"></i>
-                Performance
-            </NavLink>
-            <NavLink class="nav-link" href="backtest">
-                <i class="ph ph-flask nav-icon-ph"></i>
-                <i class="ph-fill ph-flask nav-icon-ph-active"></i>
-                Backtest
-            </NavLink>
-            <NavLink class="nav-link" href="overrides">
-                <i class="ph ph-pencil-simple nav-icon-ph"></i>
-                <i class="ph-fill ph-pencil-simple nav-icon-ph-active"></i>
-                Overrides
-            </NavLink>
-            <NavLink class="nav-link" href="simulation">
-                <i class="ph ph-game-controller nav-icon-ph"></i>
-                <i class="ph-fill ph-game-controller nav-icon-ph-active"></i>
-                Simulation
-            </NavLink>
-            <NavLink class="nav-link" href="strategy-advisor">
-                <i class="ph ph-brain nav-icon-ph"></i>
-                <i class="ph-fill ph-brain nav-icon-ph-active"></i>
-                Strategy Advisor
-            </NavLink>
-            <NavLink class="nav-link" href="portfolio-advisor">
-                <i class="ph ph-chart-pie-slice nav-icon-ph"></i>
-                <i class="ph-fill ph-chart-pie-slice nav-icon-ph-active"></i>
-                Portfolio Advisor
-            </NavLink>
+            <!-- Analytics (collapsible) -->
+            <button class="sidebar-section-toggle @(_collapsedSections.Contains("analytics") ? "collapsed" : "")"
+                    @onclick='() => ToggleSection("analytics")'>
+                <span>Analytics</span>
+                <i class="ph-bold ph-caret-down"></i>
+            </button>
+            <div class="sidebar-section-items @(_collapsedSections.Contains("analytics") ? "collapsed" : "")">
+                <NavLink class="nav-link" href="performance">
+                    <i class="ph ph-trend-up nav-icon-ph"></i>
+                    <i class="ph-fill ph-trend-up nav-icon-ph-active"></i>
+                    Performance
+                </NavLink>
+                <NavLink class="nav-link" href="backtest">
+                    <i class="ph ph-flask nav-icon-ph"></i>
+                    <i class="ph-fill ph-flask nav-icon-ph-active"></i>
+                    Backtest
+                </NavLink>
+                <NavLink class="nav-link" href="overrides">
+                    <i class="ph ph-pencil-simple nav-icon-ph"></i>
+                    <i class="ph-fill ph-pencil-simple nav-icon-ph-active"></i>
+                    Overrides
+                </NavLink>
+                <NavLink class="nav-link" href="simulation">
+                    <i class="ph ph-game-controller nav-icon-ph"></i>
+                    <i class="ph-fill ph-game-controller nav-icon-ph-active"></i>
+                    Simulation
+                </NavLink>
+                <NavLink class="nav-link" href="strategy-advisor">
+                    <i class="ph ph-brain nav-icon-ph"></i>
+                    <i class="ph-fill ph-brain nav-icon-ph-active"></i>
+                    Strategy Advisor
+                </NavLink>
+                <NavLink class="nav-link" href="portfolio-advisor">
+                    <i class="ph ph-chart-pie-slice nav-icon-ph"></i>
+                    <i class="ph-fill ph-chart-pie-slice nav-icon-ph-active"></i>
+                    Portfolio Advisor
+                </NavLink>
+            </div>
 
+            <!-- System (always visible) -->
             <span class="sidebar-section-label">System</span>
             <NavLink class="nav-link" href="admin/users">
                 <i class="ph ph-users nav-icon-ph"></i>
@@ -117,9 +140,12 @@
                         <div class="user-role">Admin</div>
                     </div>
                 </div>
-                <a href="/logout" class="btn-logout" title="Sign out">
-                    <i class="ph ph-sign-out"></i>
-                </a>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                    <Amplify.Web.Components.Shared.NotificationBell />
+                    <a href="/logout" class="btn-logout" title="Sign out">
+                        <i class="ph ph-sign-out"></i>
+                    </a>
+                </div>
             </div>
         </div>
     </nav>
@@ -129,3 +155,13 @@
         </div>
     </div>
 </div>
+
+@code {
+    private HashSet<string> _collapsedSections = new();
+
+    private void ToggleSection(string section)
+    {
+        if (!_collapsedSections.Remove(section))
+            _collapsedSections.Add(section);
+    }
+}

@@ -121,17 +121,22 @@ public class PortfolioAdvisorController : ControllerBase
                 prompt.Append($"- {w.Symbol}: {symbolPatterns.Count} live patterns, regime={regime?.Regime.ToString() ?? "Unknown"}, bias={w.LastBias ?? "N/A"}");
                 if (symbolPatterns.Any())
                 {
-                    var best = symbolPatterns.First();
-                    prompt.Append($", best={best.PatternType}({best.Direction}), conf={best.Confidence:F0}%, status={best.Status}");
+                    foreach (var pat in symbolPatterns.Take(5))
+                    {
+                        prompt.Append($"\n  [{pat.Id.ToString()[..8]}] {pat.PatternType}({pat.Direction}) {pat.Timeframe} conf={pat.Confidence:F0}% status={pat.Status}");
+                        if (pat.SuggestedEntry > 0) prompt.Append($" entry=${pat.SuggestedEntry:F2}");
+                        if (pat.SuggestedTarget > 0) prompt.Append($" tgt=${pat.SuggestedTarget:F2}");
+                        if (pat.SuggestedStop > 0) prompt.Append($" stop=${pat.SuggestedStop:F2}");
+                    }
                 }
                 if (hasPosition)
-                    prompt.Append(", HAS_POSITION");
+                    prompt.Append("\n  HAS_POSITION");
                 prompt.AppendLine();
             }
 
             prompt.AppendLine();
             prompt.AppendLine(@"JSON format:
-{""summary"":""1 sentence"",""totalSuggestedAllocation"":0,""cashRetained"":0,""allocations"":[{""symbol"":""X"",""suggestedBudget"":0,""direction"":""Long"",""confidence"":""High"",""rationale"":""why"",""riskNote"":""risk"",""portfolioPercent"":0,""skip"":false,""skipReason"":null}],""warnings"":[],""diversificationScore"":""Good""}");
+{""summary"":""1 sentence"",""totalSuggestedAllocation"":0,""cashRetained"":0,""allocations"":[{""symbol"":""X"",""suggestedBudget"":0,""direction"":""Long"",""confidence"":""High"",""rationale"":""why"",""riskNote"":""risk"",""portfolioPercent"":0,""skip"":false,""skipReason"":null,""patternIds"":[""id1""],""patternSummary"":""BullishEngulfing Daily 82%""}],""warnings"":[],""diversificationScore"":""Good""}");
 
             // ── Call AI ─────────────────────────────────────────────
             var response = await _advisor.GetAdvisoryAsync(prompt.ToString());
@@ -212,5 +217,126 @@ public class PortfolioAdvisorController : ControllerBase
             .ToListAsync();
 
         return Ok(history);
+    }
+
+    /// <summary>
+    /// Get advisor accuracy scorecard — cross-references past advice with position outcomes.
+    /// </summary>
+    [HttpGet("scorecard")]
+    public async Task<IActionResult> GetScorecard()
+    {
+        try
+        {
+            var adviceList = await _context.PortfolioAdvices
+                .Where(a => a.UserId == UserId)
+                .OrderByDescending(a => a.CreatedAt)
+                .Take(50)
+                .ToListAsync();
+
+            var allPositions = await _context.Positions
+                .Where(p => p.UserId == UserId)
+                .ToListAsync();
+
+            var results = new List<object>();
+            var byConfidence = new Dictionary<string, (int total, int executed, int profitable, decimal totalPnL)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["High"] = (0, 0, 0, 0),
+                ["Medium"] = (0, 0, 0, 0),
+                ["Low"] = (0, 0, 0, 0)
+            };
+
+            var totalAllocations = 0;
+            var totalExecuted = 0;
+            var totalProfitable = 0;
+            var totalPnL = 0m;
+            var aiExecuted = 0;
+            var manualExecuted = 0;
+
+            foreach (var advice in adviceList)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(advice.ResponseJson);
+                    if (!doc.RootElement.TryGetProperty("allocations", out var allocs)) continue;
+
+                    foreach (var alloc in allocs.EnumerateArray())
+                    {
+                        var skip = alloc.TryGetProperty("skip", out var sp) && sp.GetBoolean();
+                        if (skip) continue;
+
+                        var symbol = alloc.TryGetProperty("symbol", out var sym) ? sym.GetString() ?? "" : "";
+                        var confidence = alloc.TryGetProperty("confidence", out var conf) ? conf.GetString() ?? "Medium" : "Medium";
+                        if (string.IsNullOrEmpty(symbol)) continue;
+
+                        // Normalize confidence
+                        if (!byConfidence.ContainsKey(confidence)) confidence = "Medium";
+
+                        totalAllocations++;
+
+                        // Find matching position (created within 12h after advice)
+                        var windowEnd = advice.CreatedAt.AddHours(12);
+                        var match = allPositions
+                            .Where(p => p.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)
+                                && p.CreatedAt >= advice.CreatedAt.AddMinutes(-5)
+                                && p.CreatedAt <= windowEnd)
+                            .OrderBy(p => p.CreatedAt)
+                            .FirstOrDefault();
+
+                        var executed = match is not null;
+                        var pnl = 0m;
+                        var profitable = false;
+
+                        if (executed)
+                        {
+                            totalExecuted++;
+                            if (match!.IsAiGenerated) aiExecuted++;
+                            else manualExecuted++;
+
+                            pnl = match.Status == PositionStatus.Closed
+                                ? match.RealizedPnL
+                                : match.UnrealizedPnL;
+                            profitable = pnl > 0;
+                            if (profitable) totalProfitable++;
+                            totalPnL += pnl;
+                        }
+
+                        var entry = byConfidence[confidence];
+                        byConfidence[confidence] = (
+                            entry.total + 1,
+                            entry.executed + (executed ? 1 : 0),
+                            entry.profitable + (profitable ? 1 : 0),
+                            entry.totalPnL + pnl
+                        );
+                    }
+                }
+                catch { /* skip malformed advice */ }
+            }
+
+            return Ok(new
+            {
+                AdviceCount = adviceList.Count,
+                TotalAllocations = totalAllocations,
+                TotalExecuted = totalExecuted,
+                TotalProfitable = totalProfitable,
+                ExecutionRate = totalAllocations > 0 ? Math.Round((decimal)totalExecuted / totalAllocations * 100, 1) : 0,
+                WinRate = totalExecuted > 0 ? Math.Round((decimal)totalProfitable / totalExecuted * 100, 1) : 0,
+                TotalPnL = Math.Round(totalPnL, 2),
+                AiExecuted = aiExecuted,
+                ManualExecuted = manualExecuted,
+                ByConfidence = byConfidence.Select(kv => new
+                {
+                    Confidence = kv.Key,
+                    Total = kv.Value.total,
+                    Executed = kv.Value.executed,
+                    Profitable = kv.Value.profitable,
+                    WinRate = kv.Value.executed > 0 ? Math.Round((decimal)kv.Value.profitable / kv.Value.executed * 100, 1) : 0,
+                    TotalPnL = Math.Round(kv.Value.totalPnL, 2)
+                }).ToList()
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 }

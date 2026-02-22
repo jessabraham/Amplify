@@ -1,5 +1,58 @@
 ﻿// ===== TRADINGVIEW LIGHTWEIGHT CHARTS WITH INDICATORS =====
 
+// ── OHLC Legend helper ──
+function createOhlcLegend(container, chart, series, symbol) {
+    const legend = document.createElement('div');
+    legend.style.cssText = 'position:absolute;top:8px;left:12px;z-index:10;font-family:"JetBrains Mono",monospace;font-size:11px;pointer-events:none;display:flex;gap:8px;align-items:center;';
+    container.style.position = 'relative';
+    container.appendChild(legend);
+
+    function formatPrice(v) {
+        if (v === undefined || v === null) return '—';
+        return v >= 1000 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toFixed(4);
+    }
+
+    function update(param) {
+        let bar = null;
+        if (param?.seriesData) {
+            bar = param.seriesData.get(series);
+        }
+        if (!bar && series.data) {
+            // fallback to last bar
+        }
+        if (!bar || bar.open === undefined) {
+            legend.innerHTML = symbol ? `<span style="color:#e2e8f0;font-weight:600;">${symbol}</span>` : '';
+            return;
+        }
+
+        const o = bar.open, h = bar.high, l = bar.low, c = bar.close;
+        const change = c - o;
+        const pct = o > 0 ? (change / o * 100) : 0;
+        const clr = c >= o ? '#10b981' : '#ef4444';
+
+        legend.innerHTML = `
+            ${symbol ? `<span style="color:#e2e8f0;font-weight:600;">${symbol}</span>` : ''}
+            <span style="color:#8b8fa3;">O</span><span style="color:${clr};">${formatPrice(o)}</span>
+            <span style="color:#8b8fa3;">H</span><span style="color:${clr};">${formatPrice(h)}</span>
+            <span style="color:#8b8fa3;">L</span><span style="color:${clr};">${formatPrice(l)}</span>
+            <span style="color:#8b8fa3;">C</span><span style="color:${clr};">${formatPrice(c)}</span>
+            <span style="color:${clr};">${change >= 0 ? '+' : ''}${formatPrice(change)} (${change >= 0 ? '+' : ''}${pct.toFixed(2)}%)</span>
+        `;
+    }
+
+    chart.subscribeCrosshairMove(update);
+
+    // Show last bar initially
+    const data = series.data ? series.data() : [];
+    if (data.length > 0) {
+        update({ seriesData: new Map([[series, data[data.length - 1]]]) });
+    } else {
+        update({});
+    }
+
+    return legend;
+}
+
 let mainChart = null;
 let rsiChart = null;
 let candleSeries = null;
@@ -49,6 +102,9 @@ window.createFullChart = (containerId, rsiContainerId, candleData, volumeData, s
         wickDownColor: '#ef4444'
     });
     candleSeries.setData(candleData);
+
+    // OHLC legend
+    createOhlcLegend(container, mainChart, candleSeries);
 
     // Volume histogram
     volumeSeries = mainChart.addHistogramSeries({
@@ -126,31 +182,54 @@ window.createFullChart = (containerId, rsiContainerId, candleData, volumeData, s
         bbLowerSeries.setData(bbLower);
     }
 
-    // Price lines (entry, stop, targets)
+    // Price lines (entry, stop, targets) + markers on candles
+    const fullMarkers = [];
+
     if (entryPrice > 0) {
         candleSeries.createPriceLine({
             price: entryPrice, color: '#3b82f6', lineWidth: 1, lineStyle: 2,
             axisLabelVisible: true, title: 'Entry'
         });
+        // Find candle nearest to entry price
+        let entryCandle = null;
+        for (let i = 0; i < candleData.length; i++) {
+            if (candleData[i].low <= entryPrice && candleData[i].high >= entryPrice) {
+                entryCandle = candleData[i];
+                break;
+            }
+        }
+        if (entryCandle) {
+            fullMarkers.push({
+                time: entryCandle.time,
+                position: 'belowBar',
+                color: '#3b82f6',
+                shape: 'arrowUp',
+                text: '► ENTRY ' + entryPrice.toFixed(2),
+                size: 2
+            });
+        }
     }
     if (stopLoss > 0) {
         candleSeries.createPriceLine({
-            price: stopLoss, color: '#ef4444', lineWidth: 1, lineStyle: 2,
+            price: stopLoss, color: '#ef444460', lineWidth: 1, lineStyle: 2,
             axisLabelVisible: true, title: 'Stop'
         });
     }
     if (target1 > 0) {
         candleSeries.createPriceLine({
-            price: target1, color: '#10b981', lineWidth: 1, lineStyle: 2,
+            price: target1, color: '#10b98160', lineWidth: 1, lineStyle: 2,
             axisLabelVisible: true, title: 'T1'
         });
     }
     if (target2 > 0) {
         candleSeries.createPriceLine({
-            price: target2, color: '#10b981', lineWidth: 1, lineStyle: 2,
+            price: target2, color: '#10b98160', lineWidth: 1, lineStyle: 2,
             axisLabelVisible: true, title: 'T2'
         });
     }
+
+    fullMarkers.sort((a, b) => a.time - b.time);
+    if (fullMarkers.length > 0) candleSeries.setMarkers(fullMarkers);
 
     mainChart.timeScale().fitContent();
 
@@ -438,6 +517,9 @@ window.createPatternChart = (containerId, candleData, volumeData, patterns, keyL
     });
     patternCandleSeries.setData(candleData);
 
+    // OHLC legend
+    createOhlcLegend(container, patternChart, patternCandleSeries);
+
     // Volume
     if (volumeData && volumeData.length > 0) {
         patternVolumeSeries = patternChart.addHistogramSeries({
@@ -614,22 +696,22 @@ window.updatePatternSelection = (selectedPatternIndices) => {
             });
         }
 
-        // ── PRICE LINES (still useful as reference) ──
+        // ── PRICE LINES (faded reference lines) ──
         if (p.entry > 0) {
             currentPriceLines.push(patternCandleSeries.createPriceLine({
-                price: p.entry, color: '#3b82f6', lineWidth: 1, lineStyle: 0,
+                price: p.entry, color: '#3b82f680', lineWidth: 1, lineStyle: 0,
                 axisLabelVisible: true, title: ''
             }));
         }
         if (p.stop > 0) {
             currentPriceLines.push(patternCandleSeries.createPriceLine({
-                price: p.stop, color: '#ef4444', lineWidth: 1, lineStyle: 2,
+                price: p.stop, color: '#ef444460', lineWidth: 1, lineStyle: 2,
                 axisLabelVisible: true, title: ''
             }));
         }
         if (p.target > 0) {
             currentPriceLines.push(patternCandleSeries.createPriceLine({
-                price: p.target, color: '#10b981', lineWidth: 1, lineStyle: 2,
+                price: p.target, color: '#10b98160', lineWidth: 1, lineStyle: 2,
                 axisLabelVisible: true, title: ''
             }));
         }
@@ -721,5 +803,187 @@ window.destroyPatternChart = () => {
         storedCandleData = [];
         storedPatterns = [];
         currentPriceLines = [];
+    }
+};
+// ===== POSITION CHART (full interactive candlestick) =====
+let miniChartInstances = {};
+
+window.createMiniChart = (containerId, candleData, options) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (miniChartInstances[containerId]) {
+        if (miniChartInstances[containerId]._ro) miniChartInstances[containerId]._ro.disconnect();
+        miniChartInstances[containerId].remove();
+        delete miniChartInstances[containerId];
+    }
+    container.innerHTML = '';
+
+    const height = options?.height || 500;
+
+    const chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: height,
+        layout: {
+            background: { color: '#0f1729' },
+            textColor: '#8b8fa3',
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono', monospace"
+        },
+        grid: {
+            vertLines: { color: 'rgba(255,255,255,0.04)' },
+            horzLines: { color: 'rgba(255,255,255,0.04)' }
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: 'rgba(6,182,212,0.4)', width: 1, style: 2 },
+            horzLine: { color: 'rgba(6,182,212,0.4)', width: 1, style: 2 }
+        },
+        rightPriceScale: {
+            borderColor: 'rgba(255,255,255,0.08)',
+            scaleMargins: { top: 0.08, bottom: 0.15 }
+        },
+        timeScale: {
+            borderColor: 'rgba(255,255,255,0.08)',
+            timeVisible: true,
+            secondsVisible: false
+        },
+        // ENABLE zoom and scroll
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+    });
+
+    // Candlestick series
+    const series = chart.addCandlestickSeries({
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderUpColor: '#10b981',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#10b98188',
+        wickDownColor: '#ef444488'
+    });
+    series.setData(candleData);
+
+    // OHLC legend
+    createOhlcLegend(container, chart, series, options?.symbol);
+
+    // Volume
+    if (candleData.some(c => c.volume > 0)) {
+        const volSeries = chart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'vol'
+        });
+        chart.priceScale('vol').applyOptions({
+            scaleMargins: { top: 0.85, bottom: 0 }
+        });
+        volSeries.setData(candleData.map(c => ({
+            time: c.time,
+            value: c.volume || 0,
+            color: c.close >= c.open ? '#10b98125' : '#ef444425'
+        })));
+    }
+
+    // ── MARKERS for entry and exit events on candles ──
+    const markers = [];
+    const entryPrice = options?.entry || 0;
+    const stopPrice = options?.stop || 0;
+    const targetPrice = options?.target || 0;
+    const entryTime = options?.entryTime || 0;
+    const isLong = options?.isLong !== false;
+    const exitPrice = options?.exitPrice || 0;
+    const exitTime = options?.exitTime || 0;
+    const isClosed = options?.isClosed === true;
+
+    // ── ENTRY marker (always shown — this event happened) ──
+    if (entryPrice > 0 && candleData.length > 0) {
+        let entryCandle = null;
+        if (entryTime > 0) {
+            let minDist = Infinity;
+            candleData.forEach(c => {
+                const dist = Math.abs(c.time - entryTime);
+                if (dist < minDist) { minDist = dist; entryCandle = c; }
+            });
+        }
+        if (!entryCandle) {
+            for (let i = 0; i < candleData.length; i++) {
+                if (candleData[i].low <= entryPrice && candleData[i].high >= entryPrice) {
+                    entryCandle = candleData[i];
+                    break;
+                }
+            }
+        }
+        if (!entryCandle) entryCandle = candleData[0];
+
+        markers.push({
+            time: entryCandle.time,
+            position: isLong ? 'belowBar' : 'aboveBar',
+            color: '#3b82f6',
+            shape: isLong ? 'arrowUp' : 'arrowDown',
+            text: '► ENTRY ' + entryPrice.toFixed(2),
+            size: 2
+        });
+    }
+
+    // ── EXIT marker (only if position is closed) ──
+    if (isClosed && exitPrice > 0 && candleData.length > 0) {
+        let exitCandle = null;
+        if (exitTime > 0) {
+            let minDist = Infinity;
+            candleData.forEach(c => {
+                const dist = Math.abs(c.time - exitTime);
+                if (dist < minDist) { minDist = dist; exitCandle = c; }
+            });
+        }
+        if (!exitCandle) exitCandle = candleData[candleData.length - 1];
+
+        // Determine if exit was at stop, target, or manual
+        const hitStop = stopPrice > 0 && Math.abs(exitPrice - stopPrice) / stopPrice < 0.005;
+        const hitTarget = targetPrice > 0 && Math.abs(exitPrice - targetPrice) / targetPrice < 0.005;
+        const exitLabel = hitTarget ? '✓ TARGET ' : hitStop ? '✗ STOP ' : '⊘ EXIT ';
+        const exitColor = hitTarget ? '#10b981' : hitStop ? '#ef4444' : '#f59e0b';
+
+        markers.push({
+            time: exitCandle.time,
+            position: isLong ? 'aboveBar' : 'belowBar',
+            color: exitColor,
+            shape: isLong ? 'arrowDown' : 'arrowUp',
+            text: exitLabel + exitPrice.toFixed(2),
+            size: 2
+        });
+    }
+
+    // ── PRICE LINES (stop/target as dashed reference lines — always shown) ──
+    if (stopPrice > 0) {
+        series.createPriceLine({ price: stopPrice, color: '#ef444460', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Stop' });
+    }
+    if (targetPrice > 0) {
+        series.createPriceLine({ price: targetPrice, color: '#10b98160', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Target' });
+    }
+
+    // Current price line (solid cyan)
+    if (options?.currentPrice && options.currentPrice > 0) {
+        series.createPriceLine({ price: options.currentPrice, color: '#06b6d4', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: '' });
+    }
+
+    // Sort markers by time and apply
+    markers.sort((a, b) => a.time - b.time);
+    if (markers.length > 0) series.setMarkers(markers);
+
+    chart.timeScale().fitContent();
+
+    const ro = new ResizeObserver(entries => {
+        chart.applyOptions({ width: entries[0].contentRect.width });
+    });
+    ro.observe(container);
+
+    miniChartInstances[containerId] = chart;
+    miniChartInstances[containerId]._ro = ro;
+};
+
+window.disposeMiniChart = (containerId) => {
+    if (miniChartInstances[containerId]) {
+        if (miniChartInstances[containerId]._ro) miniChartInstances[containerId]._ro.disconnect();
+        miniChartInstances[containerId].remove();
+        delete miniChartInstances[containerId];
     }
 };

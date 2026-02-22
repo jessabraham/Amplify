@@ -145,7 +145,69 @@ code, .mono {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
 }
+
+    .sidebar-nav::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .sidebar-nav::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .sidebar-nav::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+    }
+
+.sidebar-section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    padding: 16px 12px 6px;
+    transition: color 0.15s;
+}
+
+    .sidebar-section-toggle:hover {
+        color: var(--text-secondary);
+    }
+
+    .sidebar-section-toggle i {
+        font-size: 0.55rem;
+        transition: transform 0.2s;
+    }
+
+    .sidebar-section-toggle.collapsed i {
+        transform: rotate(-90deg);
+    }
+
+.sidebar-section-items {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease;
+    max-height: 500px;
+    opacity: 1;
+}
+
+    .sidebar-section-items.collapsed {
+        max-height: 0;
+        opacity: 0;
+        pointer-events: none;
+    }
 
 .sidebar-section-label {
     font-size: 0.65rem;

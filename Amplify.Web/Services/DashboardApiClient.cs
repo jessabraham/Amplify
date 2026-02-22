@@ -56,6 +56,16 @@ public class DashboardData
     public List<DashPositionItem> TopPositions { get; set; } = new();
     public List<DashPatternItem> RecentPatterns { get; set; } = new();
     public List<DashRegimeItem> RecentRegimes { get; set; } = new();
+    // AI vs Manual
+    public int AiOpenCount { get; set; }
+    public int ManualOpenCount { get; set; }
+    public decimal AiOpenPnL { get; set; }
+    public decimal ManualOpenPnL { get; set; }
+    public decimal AiClosedPnL { get; set; }
+    public decimal ManualClosedPnL { get; set; }
+    public int AiClosedCount { get; set; }
+    public int ManualClosedCount { get; set; }
+    public int ActivePatternCount { get; set; }
 }
 
 public class RegimeItem
